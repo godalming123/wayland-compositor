@@ -1,7 +1,9 @@
 use smithay::{
     backend::input::{
-        AbsolutePositionEvent, Axis, AxisSource, ButtonState, Event, InputBackend, InputEvent,
-        KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent,
+        AbsolutePositionEvent, Axis, AxisSource,
+        ButtonState::{self},
+        Event, InputBackend, InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent,
+        PointerButtonEvent,
     },
     input::{
         keyboard::FilterResult,
@@ -13,6 +15,28 @@ use smithay::{
 
 use crate::state::Smallvil;
 
+fn mod_pressed(s: &smithay::input::keyboard::ModifiersState) -> bool {
+    return s.alt;
+}
+
+enum KeyToggleWithModPressed {
+    F,
+}
+
+fn parse_key(
+    _: &mut Smallvil,
+    state: &smithay::input::keyboard::ModifiersState,
+    handle: smithay::input::keyboard::KeysymHandle<'_>,
+) -> FilterResult<KeyToggleWithModPressed> {
+    let sym = handle.modified_sym();
+    println!("Parsing keyboard event {:?}", sym.name());
+    if mod_pressed(state) && sym.key_char() == Option::Some('f') {
+        FilterResult::Intercept(KeyToggleWithModPressed::F)
+    } else {
+        FilterResult::Forward
+    }
+}
+
 impl Smallvil {
     pub fn process_input_event<I: InputBackend>(&mut self, event: InputEvent<I>) {
         match event {
@@ -20,14 +44,35 @@ impl Smallvil {
                 let serial = SERIAL_COUNTER.next_serial();
                 let time = Event::time_msec(&event);
 
-                self.seat.get_keyboard().unwrap().input::<(), _>(
-                    self,
-                    event.key_code(),
-                    event.state(),
-                    serial,
-                    time,
-                    |_, _, _| FilterResult::Forward,
-                );
+                let state = event.state();
+                let res = self
+                    .seat
+                    .get_keyboard()
+                    .unwrap()
+                    .input::<KeyToggleWithModPressed, _>(
+                        self,
+                        event.key_code(),
+                        state,
+                        serial,
+                        time,
+                        parse_key,
+                    );
+                match res {
+                    Option::None => {}
+                    Option::Some(KeyToggleWithModPressed::F) => {
+                        if state == KeyState::Pressed {
+                            println!("Spawning firefox");
+                            let res = std::process::Command::new("firefox")
+                                .env("WAYLAND_DISPLAY", self.socket_name.clone()) // TODO: Do not use clone if possible
+                                .stdout(std::process::Stdio::null())
+                                .stdin(std::process::Stdio::null())
+                                .spawn();
+                            if let Err(e) = res {
+                                println!("Failed to spawn {}", e);
+                            }
+                        }
+                    }
+                }
             }
             InputEvent::PointerMotion { .. } => {}
             InputEvent::PointerMotionAbsolute { event, .. } => {
@@ -102,12 +147,12 @@ impl Smallvil {
             InputEvent::PointerAxis { event, .. } => {
                 let source = event.source();
 
-                let horizontal_amount = event
-                    .amount(Axis::Horizontal)
-                    .unwrap_or_else(|| event.amount_v120(Axis::Horizontal).unwrap_or(0.0) * 15.0 / 120.);
-                let vertical_amount = event
-                    .amount(Axis::Vertical)
-                    .unwrap_or_else(|| event.amount_v120(Axis::Vertical).unwrap_or(0.0) * 15.0 / 120.);
+                let horizontal_amount = event.amount(Axis::Horizontal).unwrap_or_else(|| {
+                    event.amount_v120(Axis::Horizontal).unwrap_or(0.0) * 15.0 / 120.
+                });
+                let vertical_amount = event.amount(Axis::Vertical).unwrap_or_else(|| {
+                    event.amount_v120(Axis::Vertical).unwrap_or(0.0) * 15.0 / 120.
+                });
                 let horizontal_amount_discrete = event.amount_v120(Axis::Horizontal);
                 let vertical_amount_discrete = event.amount_v120(Axis::Vertical);
 
