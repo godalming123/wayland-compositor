@@ -8,7 +8,7 @@ tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 bitflags = "2.2.1"
 
 [dependencies.smithay]
-path = "../"
+version = "0.7.0"
 default-features = false
 features = [
     "backend_winit",
