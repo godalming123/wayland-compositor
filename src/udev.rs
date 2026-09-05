@@ -884,7 +884,12 @@ impl Smallvil {
     }
 
     // If crtc is `Some()`, render it, else render all crtcs
-    pub(crate) fn render(&mut self, node: DrmNode, crtc: Option<crtc::Handle>, frame_target: Time<Monotonic>) {
+    pub(crate) fn render(
+        &mut self,
+        node: DrmNode,
+        crtc: Option<crtc::Handle>,
+        frame_target: Time<Monotonic>,
+    ) {
         if self
             .backend_data
             .as_ref()
@@ -894,6 +899,9 @@ impl Smallvil {
             error!("Trying to render on non-existent backend {}", node);
             return;
         }
+
+        // Update the workspace position before rendering this frame.
+        self.update_workspace_position();
 
         if let Some(crtc) = crtc {
             self.render_surface(node, crtc, frame_target);

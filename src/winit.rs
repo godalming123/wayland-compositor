@@ -47,8 +47,6 @@ pub fn init_winit(
     std::env::set_var("WAYLAND_DISPLAY", &state.socket_name);
 
     event_loop.insert_source(winit, move |event, _, data: &mut Smallvil| {
-        let display = &mut data.display_handle;
-
         match event {
             WinitEvent::Resized { size, .. } => {
                 output.change_current_state(
@@ -63,6 +61,9 @@ pub fn init_winit(
             }
             WinitEvent::Input(event) => data.process_input_event(event),
             WinitEvent::Redraw => {
+                // Update the workspace position before rendering this frame.
+                data.update_workspace_position();
+
                 let size = backend.window_size();
                 let damage = Rectangle::from_size(size);
 
@@ -99,7 +100,7 @@ pub fn init_winit(
 
                 data.space.refresh();
                 data.popups.cleanup();
-                let _ = display.flush_clients();
+                let _ = data.display_handle.flush_clients();
 
                 // Ask for redraw to schedule new frame.
                 backend.window().request_redraw();

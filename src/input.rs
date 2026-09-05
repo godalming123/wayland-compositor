@@ -209,7 +209,7 @@ pub fn get_pos(
     }
 }
 
-fn position_windows(s: &mut Smallvil, pos: Point<f64, Logical>) {
+pub fn position_windows(s: &mut Smallvil, pos: Point<f64, Logical>) {
     let output_geometry = match s.focussed_output_geometry() {
         Option::Some(o) => o,
         Option::None => {
@@ -524,7 +524,6 @@ impl Smallvil {
         };
         let new_pos = old_pos + event.delta();
         self.cur_workspace_state = WorkspaceState::Grabbed(new_pos);
-        position_windows(self, new_pos);
     }
 
     fn on_gesture_swipe_end<I: InputBackend>(&mut self, _event: I::GestureSwipeEndEvent) {

@@ -67,6 +67,7 @@ pub const EMPTY_WORKSPACE: SmallvilWorkspace = SmallvilWorkspace {
     bottom_window: Option::None,
 };
 
+#[derive(Clone, Copy)]
 pub enum WindowPosition {
     Left,
     Top,
@@ -95,7 +96,7 @@ pub struct AnimationInfo {
 
 const NANOS_PER_SEC: u32 = 1_000_000_000;
 
-fn get_progress(d: Duration) -> f64 {
+pub fn get_progress(d: Duration) -> f64 {
     if d.as_secs() > 1 {
         1.0
     } else {
@@ -410,6 +411,43 @@ impl Smallvil {
                 );
             });
         }
+    }
+
+    /// Computes the current position of the workspace based on
+    /// [`Smallvil::cur_workspace_state`] and lays out the windows accordingly.
+    ///
+    /// - `WindowFocussed`: the workspace sits at the position of the focused window
+    ///   (via [`get_pos`])
+    /// - `Animating`: the position (and velocity) are animated (via
+    ///   [`get_pos_and_velocity`]); once the animation finished the state
+    ///   transitions to `WindowFocussed`
+    /// - `Grabbed`: the workspace follows the position of the grab
+    ///
+    /// Should be called on every render.
+    pub fn update_workspace_position(&mut self) {
+        let output_geometry = match self.focussed_output_geometry() {
+            Option::Some(geometry) => geometry,
+            Option::None => {
+                warn!("Failed to get output geometry");
+                return;
+            }
+        };
+
+        let pos = match &self.cur_workspace_state {
+            WorkspaceState::WindowFocussed(window) => get_pos(output_geometry, window),
+            WorkspaceState::Animating(info) => {
+                let progress =
+                    get_progress(SystemTime::now().duration_since(info.start_time).unwrap());
+                let (pos, _velocity) = get_pos_and_velocity(info, output_geometry);
+                if progress >= 1.0 {
+                    self.cur_workspace_state = WorkspaceState::WindowFocussed(info.end_pos);
+                }
+                pos
+            }
+            WorkspaceState::Grabbed(pos) => *pos,
+        };
+
+        crate::input::position_windows(self, pos);
     }
 }
 
