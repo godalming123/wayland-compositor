@@ -36,13 +36,13 @@ impl XdgShellHandler for Smallvil {
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         let window = Window::new_wayland_window(surface);
-        if self.workspaces[self.cur_workspace].left_window == Option::None {
+        if self.workspaces[self.cur_workspace].left_window.is_none() {
             self.workspaces[self.cur_workspace].left_window = Some(window.clone());
-        } else if self.workspaces[self.cur_workspace].top_window == Option::None {
+        } else if self.workspaces[self.cur_workspace].top_window.is_none() {
             self.workspaces[self.cur_workspace].top_window = Some(window.clone());
-        } else if self.workspaces[self.cur_workspace].right_window == Option::None {
+        } else if self.workspaces[self.cur_workspace].right_window.is_none() {
             self.workspaces[self.cur_workspace].right_window = Some(window.clone());
-        } else if self.workspaces[self.cur_workspace].bottom_window == Option::None {
+        } else if self.workspaces[self.cur_workspace].bottom_window.is_none() {
             self.workspaces[self.cur_workspace].bottom_window = Some(window.clone());
         }
         self.space.map_element(window, (0, 0), false);

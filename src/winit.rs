@@ -8,18 +8,17 @@ use smithay::{
         winit::{self, WinitEvent},
     },
     output::{Mode, Output, PhysicalProperties, Subpixel},
-    reexports::calloop::EventLoop,
+    reexports::calloop::LoopHandle,
     utils::{Rectangle, Transform},
 };
 
-use crate::{CalloopData, Smallvil};
+use crate::Smallvil;
 
 pub fn init_winit(
-    event_loop: &mut EventLoop<CalloopData>,
-    data: &mut CalloopData,
+    event_loop: &LoopHandle<'static, Smallvil>,
+    state: &mut Smallvil,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let display_handle = &mut data.display_handle;
-    let state = &mut data.state;
+    let display_handle = state.display_handle.clone();
 
     let (mut backend, winit) = winit::init()?;
 
@@ -37,7 +36,7 @@ pub fn init_winit(
             model: "Winit".into(),
         },
     );
-    let _global = output.create_global::<Smallvil>(display_handle);
+    let _global = output.create_global::<Smallvil>(&display_handle);
     output.change_current_state(Some(mode), Some(Transform::Flipped180), None, Some((0, 0).into()));
     output.set_preferred(mode);
 
@@ -47,9 +46,8 @@ pub fn init_winit(
 
     std::env::set_var("WAYLAND_DISPLAY", &state.socket_name);
 
-    event_loop.handle().insert_source(winit, move |event, _, data| {
+    event_loop.insert_source(winit, move |event, _, data: &mut Smallvil| {
         let display = &mut data.display_handle;
-        let state = &mut data.state;
 
         match event {
             WinitEvent::Resized { size, .. } => {
@@ -63,7 +61,7 @@ pub fn init_winit(
                     None,
                 );
             }
-            WinitEvent::Input(event) => state.process_input_event(event),
+            WinitEvent::Input(event) => data.process_input_event(event),
             WinitEvent::Redraw => {
                 let size = backend.window_size();
                 let damage = Rectangle::from_size(size);
@@ -81,7 +79,7 @@ pub fn init_winit(
                         &mut framebuffer,
                         1.0,
                         0,
-                        [&state.space],
+                        [&data.space],
                         &[],
                         &mut damage_tracker,
                         [0.1, 0.1, 0.1, 1.0],
@@ -90,24 +88,25 @@ pub fn init_winit(
                 }
                 backend.submit(Some(&[damage])).unwrap();
 
-                state.space.elements().for_each(|window| {
+                data.space.elements().for_each(|window| {
                     window.send_frame(
                         &output,
-                        state.start_time.elapsed(),
+                        data.start_time.elapsed(),
                         Some(Duration::ZERO),
                         |_, _| Some(output.clone()),
                     )
                 });
 
-                state.space.refresh();
-                state.popups.cleanup();
+                data.space.refresh();
+                data.popups.cleanup();
                 let _ = display.flush_clients();
 
                 // Ask for redraw to schedule new frame.
                 backend.window().request_redraw();
             }
             WinitEvent::CloseRequested => {
-                state.loop_signal.stop();
+                data.running.store(false, std::sync::atomic::Ordering::SeqCst);
+                data.loop_signal.stop();
             }
             _ => (),
         };

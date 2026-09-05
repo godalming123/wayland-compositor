@@ -1,27 +1,49 @@
 #![allow(irrefutable_let_patterns)]
 
+mod cursor;
+mod drawing;
 mod handlers;
-
 mod grabs;
 mod input;
 mod state;
+mod udev;
 mod winit;
 
-use smithay::reexports::{
-    calloop::EventLoop,
-    input::Libinput,
-    wayland_server::{Display, DisplayHandle},
+use std::{
+    collections::HashMap,
+    sync::atomic::Ordering,
+    time::Duration,
 };
-pub use state::Smallvil;
 
-pub struct CalloopData {
-    state: Smallvil,
-    display_handle: DisplayHandle,
-}
+use smithay::{
+    backend::{
+        drm::{DrmNode, NodeType},
+        egl::context::ContextPriority,
+        input::{InputEvent},
+        libinput::{LibinputInputBackend, LibinputSessionInterface},
+        renderer::{
+            multigpu::{gbm::GbmGlesBackend, GpuManager},
+            ImportDma, ImportEgl, ImportMemWl,
+        },
+        session::{libseat::LibSeatSession, Event as SessionEvent, Session},
+        udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
+    },
+    reexports::input::{DeviceCapability, Libinput},
+    reexports::calloop::EventLoop,
+    wayland::{
+        dmabuf::{DmabufFeedbackBuilder, DmabufState},
+        drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState},
+    },
+};
+
+use crate::state::Smallvil;
+
+pub use udev::UdevData;
+use udev::{get_surface_dmabuf_feedback, DeviceAddError};
 
 fn print_help() {
     println!("- `winnit` - Start windowed");
-    println!("- `tty-udev`");
+    println!("- `tty-udev` - Start on a tty using the udev backend (requires root if without logind)");
     println!("- `help` - Show this help message");
 }
 
@@ -49,27 +71,24 @@ fn main() {
 }
 
 fn run_winnit() {
-    let mut event_loop: EventLoop<CalloopData> = EventLoop::try_new().unwrap();
-    let display: Display<Smallvil> = Display::new().unwrap();
-    let display_handle = display.handle();
-    let state = Smallvil::new(&mut event_loop, display);
-    let mut data = CalloopData {
-        state,
-        display_handle,
-    };
+    let mut event_loop: EventLoop<Smallvil> = EventLoop::try_new().unwrap();
+    let display: smithay::reexports::wayland_server::Display<Smallvil> =
+        smithay::reexports::wayland_server::Display::new().unwrap();
+    let mut state = Smallvil::new(&mut event_loop, display, None);
 
-    crate::winit::init_winit(&mut event_loop, &mut data).unwrap();
+    crate::winit::init_winit(&event_loop.handle(), &mut state).unwrap();
 
     event_loop
-        .run(None, &mut data, move |_| {
+        .run(None, &mut state, move |_| {
             // Smallvil is running
         })
         .unwrap();
 }
 
 fn run_udev() {
-    let mut event_loop = EventLoop::try_new().unwrap();
-    let display = Display::new().unwrap();
+    let mut event_loop: EventLoop<Smallvil> = EventLoop::try_new().unwrap();
+    let display: smithay::reexports::wayland_server::Display<Smallvil> =
+        smithay::reexports::wayland_server::Display::new().unwrap();
     let mut display_handle = display.handle();
 
     /*
@@ -79,7 +98,7 @@ fn run_udev() {
         Ok(ret) => ret,
         Err(err) => {
             eprintln!("Could not initialize a session: {}", err);
-            Ok(())
+            return;
         }
     };
 
@@ -110,7 +129,6 @@ fn run_udev() {
     let gpus =
         GpuManager::new(GbmGlesBackend::with_context_priority(ContextPriority::High)).unwrap();
 
-    /*
     let data = UdevData {
         dh: display_handle.clone(),
         dmabuf_state: None,
@@ -121,14 +139,10 @@ fn run_udev() {
         backends: HashMap::new(),
         pointer_image: crate::cursor::Cursor::load(),
         pointer_images: Vec::new(),
-        pointer_element: PointerElement::default(),
-        #[cfg(feature = "debug")]
-        fps_texture: None,
-        debug_flags: DebugFlags::empty(),
+        pointer_element: crate::drawing::PointerElement::default(),
         keyboards: Vec::new(),
     };
-    */
-    let state = Smallvil::new(&mut event_loop, display);
+    let mut state = Smallvil::new(&mut event_loop, display, Some(data));
 
     /*
      * Initialize the udev backend
@@ -145,7 +159,13 @@ fn run_udev() {
      * Initialize libinput backend
      */
     let mut libinput_context = Libinput::new_with_udev::<LibinputSessionInterface<LibSeatSession>>(
-        state.backend_data.session.clone().into(),
+        state
+            .backend_data
+            .as_ref()
+            .unwrap()
+            .session
+            .clone()
+            .into(),
     );
     libinput_context.udev_assign_seat(&state.seat_name).unwrap();
     let libinput_backend = LibinputInputBackend::new(libinput_context.clone());
@@ -155,8 +175,7 @@ fn run_udev() {
      */
     event_loop
         .handle()
-        .insert_source(libinput_backend, move |mut event, _, data| {
-            let dh = data.backend_data.dh.clone();
+        .insert_source(libinput_backend, move |mut event, _, data: &mut Smallvil| {
             if let InputEvent::DeviceAdded { device } = &mut event {
                 if device.has_capability(DeviceCapability::Keyboard) {
                     if let Some(led_state) = data
@@ -166,30 +185,32 @@ fn run_udev() {
                     {
                         device.led_update(led_state.into());
                     }
-                    data.backend_data.keyboards.push(device.clone());
+                    if let Some(backend) = data.backend_data.as_mut() {
+                        backend.keyboards.push(device.clone());
+                    }
                 }
             } else if let InputEvent::DeviceRemoved { ref device } = event {
                 if device.has_capability(DeviceCapability::Keyboard) {
-                    data.backend_data.keyboards.retain(|item| item != device);
+                    if let Some(backend) = data.backend_data.as_mut() {
+                        backend.keyboards.retain(|item| item != device);
+                    }
                 }
             }
 
-            data.process_input_event(&dh, event)
+            data.process_input_event(event)
         })
         .unwrap();
 
     event_loop
         .handle()
-        .insert_source(notifier, move |event, &mut (), data| match event {
+        .insert_source(notifier, move |event, &mut (), data: &mut Smallvil| match event {
             SessionEvent::PauseSession => {
                 libinput_context.suspend();
                 println!("pausing session");
 
-                for backend in data.backend_data.backends.values_mut() {
-                    backend.drm_output_manager.pause();
-                    backend.active_leases.clear();
-                    if let Some(lease_global) = backend.leasing_global.as_mut() {
-                        lease_global.suspend();
+                if let Some(backend_data) = data.backend_data.as_mut() {
+                    for backend in backend_data.backends.values_mut() {
+                        backend.drm_output_manager.pause();
                     }
                 }
             }
@@ -199,27 +220,27 @@ fn run_udev() {
                 if let Err(err) = libinput_context.resume() {
                     eprintln!("Failed to resume libinput context: {:?}", err);
                 }
-                for (node, backend) in data
-                    .backend_data
-                    .backends
-                    .iter_mut()
-                    .map(|(handle, backend)| (*handle, backend))
-                {
-                    // if we do not care about flicking (caused by modesetting) we could just
-                    // pass true for disable connectors here. this would make sure our drm
-                    // device is in a known state (all connectors and planes disabled).
-                    // but for demonstration we choose a more optimistic path by leaving the
-                    // state as is and assume it will just work. If this assumption fails
-                    // we will try to reset the state when trying to queue a frame.
-                    backend
-                        .drm_output_manager
-                        .activate(false)
-                        .expect("failed to activate drm backend");
-                    if let Some(lease_global) = backend.leasing_global.as_mut() {
-                        lease_global.resume::<AnvilState<UdevData>>();
+                if let Some(backend_data) = data.backend_data.as_mut() {
+                    for (node, backend) in backend_data
+                        .backends
+                        .iter_mut()
+                        .map(|(handle, backend)| (*handle, backend))
+                    {
+                        // if we do not care about flicking (caused by modesetting) we could just
+                        // pass true for disable connectors here. this would make sure our drm
+                        // device is in a known state (all connectors and planes disabled).
+                        // but for demonstration we choose a more optimistic path by leaving the
+                        // state as is and assume it will just work. If this assumption fails
+                        // we will try to reset the state when trying to queue a frame.
+                        backend
+                            .drm_output_manager
+                            .activate(false)
+                            .expect("failed to activate drm backend");
+                        data.handle
+                            .insert_idle(move |data: &mut Smallvil| {
+                                data.render(node, None, data.clock.now())
+                            });
                     }
-                    data.handle
-                        .insert_idle(move |data| data.render(node, None, data.clock.now()));
                 }
             }
         })
@@ -260,55 +281,29 @@ fn run_udev() {
     state.shm_state.update_formats(
         state
             .backend_data
+            .as_mut()
+            .unwrap()
             .gpus
             .single_renderer(&primary_gpu)
             .unwrap()
             .shm_formats(),
     );
 
-    #[cfg_attr(not(feature = "egl"), allow(unused_mut))]
     let mut renderer = state
         .backend_data
+        .as_mut()
+        .unwrap()
         .gpus
         .single_renderer(&primary_gpu)
         .unwrap();
 
-    #[cfg(feature = "debug")]
-    {
-        #[allow(deprecated)]
-        let fps_image = image::io::Reader::with_format(
-            std::io::Cursor::new(FPS_NUMBERS_PNG),
-            image::ImageFormat::Png,
-        )
-        .decode()
-        .unwrap();
-        let fps_texture = renderer
-            .import_memory(
-                &fps_image.to_rgba8(),
-                Fourcc::Abgr8888,
-                (fps_image.width() as i32, fps_image.height() as i32).into(),
-                false,
-            )
-            .expect("Unable to upload FPS texture");
-
-        for backend in state.backend_data.backends.values_mut() {
-            for surface in backend.surfaces.values_mut() {
-                surface.fps_element = Some(FpsElement::new(fps_texture.clone()));
-            }
-        }
-        state.backend_data.fps_texture = Some(fps_texture);
-    }
-
-    #[cfg(feature = "egl")]
-    {
-        println!(
-            ?primary_gpu,
-            "Trying to initialize EGL Hardware Acceleration",
-        );
-        match renderer.bind_wl_display(&display_handle) {
-            Ok(_) => println!("EGL hardware-acceleration enabled"),
-            Err(err) => println!(?err, "Failed to initialize EGL hardware-acceleration"),
-        }
+    println!(
+        "Trying to initialize EGL Hardware Acceleration for {:?}",
+        primary_gpu
+    );
+    match renderer.bind_wl_display(&display_handle) {
+        Ok(_) => println!("EGL hardware-acceleration enabled"),
+        Err(err) => println!("Failed to initialize EGL hardware-acceleration: {:?}", err),
     }
 
     // init dmabuf support with format list from our primary gpu
@@ -317,15 +312,15 @@ fn run_udev() {
         .build()
         .unwrap();
     let mut dmabuf_state = DmabufState::new();
-    let global = dmabuf_state.create_global_with_default_feedback::<AnvilState<UdevData>>(
+    let global = dmabuf_state.create_global_with_default_feedback::<Smallvil>(
         &display_handle,
         &default_feedback,
     );
-    state.backend_data.dmabuf_state = Some((dmabuf_state, global));
+    state.backend_data.as_mut().unwrap().dmabuf_state = Some((dmabuf_state, global));
 
-    let gpus = &mut state.backend_data.gpus;
-    state
-        .backend_data
+    let backend_data = state.backend_data.as_mut().unwrap();
+    let gpus = &mut backend_data.gpus;
+    backend_data
         .backends
         .iter_mut()
         .for_each(|(node, backend_data)| {
@@ -348,23 +343,31 @@ fn run_udev() {
     // Expose syncobj protocol if supported by primary GPU
     if let Some(primary_node) = state
         .backend_data
+        .as_ref()
+        .unwrap()
         .primary_gpu
         .node_with_type(NodeType::Primary)
         .and_then(|x| x.ok())
     {
-        if let Some(backend) = state.backend_data.backends.get(&primary_node) {
+        if let Some(backend) = state
+            .backend_data
+            .as_ref()
+            .unwrap()
+            .backends
+            .get(&primary_node)
+        {
             let import_device = backend.drm_output_manager.device().device_fd().clone();
             if supports_syncobj_eventfd(&import_device) {
                 let syncobj_state =
-                    DrmSyncobjState::new::<AnvilState<UdevData>>(&display_handle, import_device);
-                state.backend_data.syncobj_state = Some(syncobj_state);
+                    DrmSyncobjState::new::<Smallvil>(&display_handle, import_device);
+                state.backend_data.as_mut().unwrap().syncobj_state = Some(syncobj_state);
             }
         }
     }
 
     event_loop
         .handle()
-        .insert_source(udev_backend, move |event, _, data| match event {
+        .insert_source(udev_backend, move |event, _, data: &mut Smallvil| match event {
             UdevEvent::Added { device_id, path } => {
                 if let Err(err) = DrmNode::from_dev_id(device_id)
                     .map_err(DeviceAddError::DrmNode)
@@ -385,12 +388,6 @@ fn run_udev() {
             }
         })
         .unwrap();
-
-    /*
-     * Start XWayland if supported
-     */
-    #[cfg(feature = "xwayland")]
-    state.start_xwayland();
 
     /*
      * And run our loop

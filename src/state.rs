@@ -1,20 +1,41 @@
-use std::{ffi::OsString, sync::Arc};
+use std::{
+    ffi::OsString,
+    sync::{atomic::AtomicBool, Arc},
+};
 
 use smithay::{
-    desktop::{PopupManager, Space, Window, WindowSurfaceType},
-    input::{Seat, SeatState},
+    backend::{
+        renderer::element::{
+            default_primary_scanout_output_compare, utils::select_dmabuf_feedback, RenderElementStates,
+        },
+        session::Session,
+    },
+    delegate_presentation,
+    desktop::{
+        utils::{
+            surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
+            update_surface_primary_scanout_output, with_surfaces_surface_tree, OutputPresentationFeedback,
+        },
+        PopupManager, Space, Window, WindowSurfaceType,
+    },
+    input::{pointer::CursorImageStatus, Seat, SeatState},
+    output::Output,
     reexports::{
-        calloop::{generic::Generic, EventLoop, Interest, LoopSignal, Mode, PostAction},
+        calloop::{
+            generic::Generic, EventLoop, Interest, LoopHandle, LoopSignal, Mode, PostAction,
+        },
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
             protocol::wl_surface::WlSurface,
             Display, DisplayHandle,
         },
     },
-    utils::{Logical, Point},
+    utils::{Clock, Logical, Monotonic, Point},
     wayland::{
         compositor::{CompositorClientState, CompositorState},
+        dmabuf::DmabufFeedback,
         output::OutputManagerState,
+        presentation::PresentationState,
         selection::data_device::DataDeviceState,
         shell::xdg::XdgShellState,
         shm::ShmState,
@@ -22,7 +43,7 @@ use smithay::{
     },
 };
 
-use crate::CalloopData;
+use crate::udev::UdevData;
 
 #[derive(Clone)]
 pub struct SmallvilWorkspace {
@@ -32,14 +53,33 @@ pub struct SmallvilWorkspace {
     pub bottom_window: Option< smithay::desktop::Window>,
 }
 
+#[derive(Debug)]
+pub struct DndIcon {
+    pub surface: WlSurface,
+    pub offset: Point<i32, Logical>,
+}
+
+#[derive(Clone)]
+pub struct SurfaceDmabufFeedback {
+    pub render_feedback: DmabufFeedback,
+    pub scanout_feedback: DmabufFeedback,
+}
+
 pub struct Smallvil {
     pub cur_workspace: usize,
     pub workspaces: Vec<SmallvilWorkspace>,
     pub pos: Point<f64, Logical>,
-    
+
     pub start_time: std::time::Instant,
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
+    pub seat_name: String,
+    pub running: Arc<AtomicBool>,
+    pub handle: LoopHandle<'static, Smallvil>,
+    pub clock: Clock<Monotonic>,
+    pub cursor_status: CursorImageStatus,
+    pub dnd_icon: Option<DndIcon>,
+    pub backend_data: Option<UdevData>,
 
     pub space: Space<Window>,
     pub loop_signal: LoopSignal,
@@ -48,19 +88,29 @@ pub struct Smallvil {
     pub compositor_state: CompositorState,
     pub xdg_shell_state: XdgShellState,
     pub shm_state: ShmState,
+    // These states only register their globals; they are kept for access and parity with anvil.
+    #[allow(dead_code)]
     pub output_manager_state: OutputManagerState,
     pub seat_state: SeatState<Smallvil>,
     pub data_device_state: DataDeviceState,
     pub popups: PopupManager,
+    #[allow(dead_code)]
+    pub presentation_state: PresentationState,
 
     pub seat: Seat<Self>,
 }
 
 impl Smallvil {
-    pub fn new(event_loop: &mut EventLoop<CalloopData>, display: Display<Self>) -> Self {
+    pub fn new(
+        event_loop: &mut EventLoop<'static, Self>,
+        display: Display<Self>,
+        backend_data: Option<UdevData>,
+    ) -> Self {
         let start_time = std::time::Instant::now();
 
         let dh = display.handle();
+
+        let clock = Clock::new();
 
         let compositor_state = CompositorState::new::<Self>(&dh);
         let xdg_shell_state = XdgShellState::new::<Self>(&dh);
@@ -69,10 +119,15 @@ impl Smallvil {
         let mut seat_state = SeatState::new();
         let data_device_state = DataDeviceState::new::<Self>(&dh);
         let popups = PopupManager::default();
+        let presentation_state = PresentationState::new::<Self>(&dh, clock.id() as u32);
 
         // A seat is a group of keyboards, pointer and touch devices.
         // A seat typically has a pointer and maintains a keyboard focus and a pointer focus.
-        let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, "winit");
+        let seat_name = backend_data
+            .as_ref()
+            .map(|backend| backend.session.seat())
+            .unwrap_or_else(|| "winit".to_string());
+        let mut seat: Seat<Self> = seat_state.new_wl_seat(&dh, seat_name.clone());
 
         // Notify clients that we have a keyboard, for the sake of the example we assume that keyboard is always present.
         // You may want to track keyboard hot-plug in real compositor.
@@ -88,7 +143,7 @@ impl Smallvil {
         // Outputs become views of a part of the Space and can be rendered via Space::render_output.
         let space = Space::default();
 
-        let socket_name = Self::init_wayland_listener(display, event_loop);
+        let socket_name = Self::init_wayland_listener(display, event_loop.handle());
 
         // Get the loop signal, used to stop the event loop
         let loop_signal = event_loop.get_signal();
@@ -100,6 +155,13 @@ impl Smallvil {
 
             start_time,
             display_handle: dh,
+            seat_name,
+            running: Arc::new(AtomicBool::new(true)),
+            handle: event_loop.handle(),
+            clock,
+            cursor_status: CursorImageStatus::default_named(),
+            dnd_icon: None,
+            backend_data,
 
             space,
             loop_signal,
@@ -112,13 +174,14 @@ impl Smallvil {
             seat_state,
             data_device_state,
             popups,
+            presentation_state,
             seat,
         }
     }
 
     fn init_wayland_listener(
         display: Display<Smallvil>,
-        event_loop: &mut EventLoop<CalloopData>,
+        handle: LoopHandle<'static, Smallvil>,
     ) -> OsString {
         // Creates a new listening socket, automatically choosing the next available `wayland` socket name.
         let listening_socket = ListeningSocketSource::new_auto().unwrap();
@@ -127,10 +190,8 @@ impl Smallvil {
         // Clients will connect to this socket.
         let socket_name = listening_socket.socket_name().to_os_string();
 
-        let loop_handle = event_loop.handle();
-
-        loop_handle
-            .insert_source(listening_socket, move |client_stream, _, state| {
+        handle
+            .insert_source(listening_socket, move |client_stream, _, state: &mut Smallvil| {
                 // Inside the callback, you should insert the client into the display.
                 //
                 // You may also associate some data with the client when inserting the client.
@@ -142,16 +203,13 @@ impl Smallvil {
             .expect("Failed to init the wayland event source.");
 
         // You also need to add the display itself to the event loop, so that client events will be processed by wayland-server.
-        loop_handle
+        handle
             .insert_source(
                 Generic::new(display, Interest::READ, Mode::Level),
-                |_, display, state| {
+                |_, display, state: &mut Smallvil| {
                     // Safety: we don't drop the display
                     unsafe {
-                        display
-                            .get_mut()
-                            .dispatch_clients(&mut state.state)
-                            .unwrap();
+                        display.get_mut().dispatch_clients(state).unwrap();
                     }
                     Ok(PostAction::Continue)
                 },
@@ -173,6 +231,100 @@ impl Smallvil {
                     .map(|(s, p)| (s, (p + location).to_f64()))
             })
     }
+
+    pub fn post_repaint(
+        &mut self,
+        output: &Output,
+        time: impl Into<std::time::Duration>,
+        dmabuf_feedback: Option<SurfaceDmabufFeedback>,
+        render_element_states: &RenderElementStates,
+    ) {
+        let time = time.into();
+        let throttle = Some(std::time::Duration::from_secs(1));
+
+        self.update_primary_scanout_output(output, render_element_states);
+
+        for window in self.space.elements() {
+            if self.space.outputs_for_element(window).contains(output) {
+                window.send_frame(output, time, throttle, surface_primary_scanout_output);
+                if let Some(dmabuf_feedback) = dmabuf_feedback.as_ref() {
+                    window.send_dmabuf_feedback(output, surface_primary_scanout_output, |surface, _| {
+                        select_dmabuf_feedback(
+                            surface,
+                            render_element_states,
+                            &dmabuf_feedback.render_feedback,
+                            &dmabuf_feedback.scanout_feedback,
+                        )
+                    });
+                }
+            }
+        }
+    }
+
+    fn update_primary_scanout_output(
+        &mut self,
+        output: &Output,
+        render_element_states: &RenderElementStates,
+    ) {
+        for window in self.space.elements() {
+            window.with_surfaces(|surface, states| {
+                update_surface_primary_scanout_output(
+                    surface,
+                    output,
+                    states,
+                    render_element_states,
+                    default_primary_scanout_output_compare,
+                );
+            });
+        }
+
+        let cursor_status = self.cursor_status.clone();
+        if let CursorImageStatus::Surface(ref surface) = cursor_status {
+            with_surfaces_surface_tree(surface, |surface, states| {
+                update_surface_primary_scanout_output(
+                    surface,
+                    output,
+                    states,
+                    render_element_states,
+                    default_primary_scanout_output_compare,
+                );
+            });
+        }
+
+        if let Some(icon) = self.dnd_icon.as_ref() {
+            with_surfaces_surface_tree(&icon.surface, |surface, states| {
+                update_surface_primary_scanout_output(
+                    surface,
+                    output,
+                    states,
+                    render_element_states,
+                    default_primary_scanout_output_compare,
+                );
+            });
+        }
+    }
+}
+
+pub fn take_presentation_feedback(
+    output: &Output,
+    space: &Space<Window>,
+    render_element_states: &RenderElementStates,
+) -> OutputPresentationFeedback {
+    let mut output_presentation_feedback = OutputPresentationFeedback::new(output);
+
+    space.elements().for_each(|window| {
+        if space.outputs_for_element(window).contains(output) {
+            window.take_presentation_feedback(
+                &mut output_presentation_feedback,
+                surface_primary_scanout_output,
+                |surface, _| {
+                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                },
+            );
+        }
+    });
+
+    output_presentation_feedback
 }
 
 #[derive(Default)]
@@ -184,3 +336,6 @@ impl ClientData for ClientState {
     fn initialized(&self, _client_id: ClientId) {}
     fn disconnected(&self, _client_id: ClientId, _reason: DisconnectReason) {}
 }
+
+// The presentation protocol is only consumed by clients, no special handling needed.
+delegate_presentation!(Smallvil);
