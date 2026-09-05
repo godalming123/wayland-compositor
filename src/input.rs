@@ -25,6 +25,7 @@ use crate::state::{get_pos_and_velocity, AnimationInfo, Smallvil, WindowPosition
 enum Action {
     FocusInDirection(WindowPosition),
     SpawnCommand(&'static str), // Spawn a command
+    CloseFocussedWindow,        // Close the currently focussed window
     Quit,                       // Quit the compositor
     VtSwitch(i32),              // Trigger a vt-switch
 }
@@ -63,6 +64,7 @@ fn parse_pressed_key(
             Keysym::j => FilterResult::Intercept(Action::FocusInDirection(WindowPosition::Bottom)),
             Keysym::k => FilterResult::Intercept(Action::FocusInDirection(WindowPosition::Top)),
             Keysym::l => FilterResult::Intercept(Action::FocusInDirection(WindowPosition::Right)),
+            Keysym::d => FilterResult::Intercept(Action::CloseFocussedWindow),
             _ => FilterResult::Forward,
         }
     } else {
@@ -257,8 +259,51 @@ fn spawn_command(state: &mut Smallvil, command: &str) {
     }
 }
 
-fn handle_key_action(state: &mut Smallvil, action: Action) {
-    info!("Handling key action");
+fn is_focussed_window(window: &Option<smithay::desktop::Window>, focussed: &WlSurface) -> bool {
+    window
+        .as_ref()
+        .map(|window| window.toplevel().unwrap().wl_surface() == focussed)
+        .unwrap_or(false)
+}
+
+fn close_focussed_window(state: &mut Smallvil) {
+    let Some(keyboard) = state.seat.get_keyboard() else {
+        error!("Failed to get keyboard");
+        return;
+    };
+    let Some(focussed) = keyboard.current_focus() else {
+        info!("No window is focussed");
+        return;
+    };
+
+    // Find the slot of the current workspace that holds the focussed window.
+    let workspace = &mut state.workspaces[state.cur_workspace];
+    let closed = if is_focussed_window(&workspace.left_window, &focussed) {
+        workspace.left_window.take()
+    } else if is_focussed_window(&workspace.top_window, &focussed) {
+        workspace.top_window.take()
+    } else if is_focussed_window(&workspace.right_window, &focussed) {
+        workspace.right_window.take()
+    } else if is_focussed_window(&workspace.bottom_window, &focussed) {
+        workspace.bottom_window.take()
+    } else {
+        Option::None
+    };
+
+    let Some(window) = closed else {
+        warn!("The focussed window is not part of the current workspace");
+        return;
+    };
+
+    info!("Closing focussed window");
+    window.toplevel().unwrap().send_close();
+    state.space.unmap_elem(&window);
+
+    // The window is going away, so drop the keyboard focus on it.
+    keyboard.set_focus(state, Option::<WlSurface>::None, SERIAL_COUNTER.next_serial());
+}
+
+fn handle_key_action(state: &mut Smallvil, action: Action) {    info!("Handling key action");
     match action {
         Action::SpawnCommand(command) => spawn_command(state, command),
         Action::FocusInDirection(direction) => {
@@ -289,6 +334,7 @@ fn handle_key_action(state: &mut Smallvil, action: Action) {
                 }
             }
         }
+        Action::CloseFocussedWindow => close_focussed_window(state),
         Action::Quit => {
             info!("Quitting");
             state.running.store(false, Ordering::SeqCst);
