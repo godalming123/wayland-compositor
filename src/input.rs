@@ -300,10 +300,15 @@ fn close_focussed_window(state: &mut Smallvil) {
     state.space.unmap_elem(&window);
 
     // The window is going away, so drop the keyboard focus on it.
-    keyboard.set_focus(state, Option::<WlSurface>::None, SERIAL_COUNTER.next_serial());
+    keyboard.set_focus(
+        state,
+        Option::<WlSurface>::None,
+        SERIAL_COUNTER.next_serial(),
+    );
 }
 
-fn handle_key_action(state: &mut Smallvil, action: Action) {    info!("Handling key action");
+fn handle_key_action(state: &mut Smallvil, action: Action) {
+    info!("Handling key action");
     match action {
         Action::SpawnCommand(command) => spawn_command(state, command),
         Action::FocusInDirection(direction) => {
@@ -560,7 +565,10 @@ impl Smallvil {
 
     fn on_gesture_swipe_begin<I: InputBackend>(&mut self, _event: I::GestureSwipeBeginEvent) {
         info!("Gesture swipe begin event");
-        self.cur_workspace_state = WorkspaceState::Grabbed(logical(0.0, 0.0));
+        let Option::Some(pos) = self.get_pos() else {
+            return;
+        };
+        self.cur_workspace_state = WorkspaceState::Grabbed(pos);
     }
 
     fn on_gesture_swipe_update<I: InputBackend>(&mut self, event: I::GestureSwipeUpdateEvent) {

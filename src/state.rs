@@ -415,7 +415,7 @@ impl Smallvil {
     }
 
     /// Computes the current position of the workspace based on
-    /// [`Smallvil::cur_workspace_state`] and lays out the windows accordingly.
+    /// [`Smallvil::cur_workspace_state`]
     ///
     /// - `WindowFocussed`: the workspace sits at the position of the focused window
     ///   (via [`get_pos`])
@@ -423,18 +423,12 @@ impl Smallvil {
     ///   [`get_pos_and_velocity`]); once the animation finished the state
     ///   transitions to `WindowFocussed`
     /// - `Grabbed`: the workspace follows the position of the grab
-    ///
-    /// Should be called on every render.
-    pub fn update_workspace_position(&mut self) {
-        let output_geometry = match self.focussed_output_geometry() {
-            Option::Some(geometry) => geometry,
-            Option::None => {
-                warn!("Failed to get output geometry");
-                return;
-            }
+    pub fn get_pos(&mut self) -> Option<Point<f64, Logical>> {
+        let Option::Some(output_geometry) = self.focussed_output_geometry() else {
+            warn!("Failed to get output geometry");
+            return Option::None;
         };
-
-        let pos = match &self.cur_workspace_state {
+        Option::Some(match &self.cur_workspace_state {
             WorkspaceState::WindowFocussed(window) => get_pos(output_geometry, window),
             WorkspaceState::Animating(info) => {
                 let (pos, _velocity, finished) = get_pos_and_velocity(info, output_geometry);
@@ -445,9 +439,15 @@ impl Smallvil {
                 pos
             }
             WorkspaceState::Grabbed(pos) => *pos,
-        };
+        })
+    }
 
-        crate::input::position_windows(self, pos);
+    /// Should be called on every render.
+    pub fn update_workspace_position(&mut self) {
+        match self.get_pos() {
+            Option::Some(pos) => crate::input::position_windows(self, pos),
+            Option::None => {}
+        };
     }
 }
 
