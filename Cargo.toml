@@ -12,6 +12,7 @@ version = "0.7.0"
 default-features = false
 features = [
     "backend_winit",
+    "backend_libinput",
     "wayland_frontend",
     "desktop",
 ]

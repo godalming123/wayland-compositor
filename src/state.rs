@@ -24,7 +24,19 @@ use smithay::{
 
 use crate::CalloopData;
 
+#[derive(Clone)]
+pub struct SmallvilWorkspace {
+    pub left_window: Option< smithay::desktop::Window>,
+    pub top_window: Option< smithay::desktop::Window>,
+    pub right_window: Option< smithay::desktop::Window>,
+    pub bottom_window: Option< smithay::desktop::Window>,
+}
+
 pub struct Smallvil {
+    pub cur_workspace: usize,
+    pub workspaces: Vec<SmallvilWorkspace>,
+    pub pos: Point<f64, Logical>,
+    
     pub start_time: std::time::Instant,
     pub socket_name: OsString,
     pub display_handle: DisplayHandle,
@@ -82,6 +94,10 @@ impl Smallvil {
         let loop_signal = event_loop.get_signal();
 
         Self {
+            cur_workspace: 0,
+            workspaces: Vec::new(),
+            pos: (0.0, 0.0).into(),
+
             start_time,
             display_handle: dh,
 

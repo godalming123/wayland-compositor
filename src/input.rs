@@ -1,6 +1,6 @@
 use smithay::{
     backend::input::{
-        AbsolutePositionEvent, Axis, AxisSource,
+        GestureSwipeUpdateEvent, AbsolutePositionEvent, Axis, AxisSource,
         ButtonState::{self},
         Event, InputBackend, InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent,
         PointerButtonEvent,
@@ -34,6 +34,28 @@ fn parse_key(
         FilterResult::Intercept(KeyToggleWithModPressed::F)
     } else {
         FilterResult::Forward
+    }
+}
+
+fn position_windows(s: &mut Smallvil) {
+    let left_position = s.pos;
+    let top_position = s.pos;
+    let right_position = s.pos;
+    let bottom_position = s.pos;
+
+    for workspace in &s.workspaces {
+        if let Some(ref left) = workspace.left_window {
+            s.space.map_element(left.clone(), left_position.to_i32_round(), false);
+        }
+        if let Some(ref top) = workspace.top_window {
+            s.space.map_element(top.clone(), top_position.to_i32_round(), false);
+        }
+        if let Some(ref right) = workspace.right_window {
+            s.space.map_element(right.clone(), right_position.to_i32_round(), false);
+        }
+        if let Some(ref bottom) = workspace.bottom_window {
+            s.space.map_element(bottom.clone(), bottom_position.to_i32_round(), false);
+        }
     }
 }
 
@@ -183,7 +205,28 @@ impl Smallvil {
                 pointer.axis(self, frame);
                 pointer.frame(self);
             }
+
+            InputEvent::GestureSwipeBegin {event} => self.on_gesture_swipe_begin::<I>(event),
+            InputEvent::GestureSwipeUpdate {event} => self.on_gesture_swipe_update::<I>(event),
+            InputEvent::GestureSwipeEnd {event} => self.on_gesture_swipe_end::<I>(event),
+            
             _ => {}
         }
+    }
+
+    fn on_gesture_swipe_begin<I: InputBackend>(&mut self, event: I::GestureSwipeBeginEvent) {
+        println!("Gesture swipe begin event")
+    }
+
+    fn on_gesture_swipe_update<I: InputBackend>(&mut self, event: I::GestureSwipeUpdateEvent) {
+        self.pos += event.delta();
+        println!("Gesture swipe event");
+        // println!("Gesture swipe event pos: {}, delta: {}", self.pos, event.delta());
+
+        position_windows(self)
+    }
+
+    fn on_gesture_swipe_end<I: InputBackend>(&mut self, event: I::GestureSwipeEndEvent) {
+        println!("Gesture swipe end event")
     }
 }

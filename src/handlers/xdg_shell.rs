@@ -1,6 +1,8 @@
 use smithay::{
     delegate_xdg_shell,
-    desktop::{find_popup_root_surface, get_popup_toplevel_coords, PopupKind, PopupManager, Space, Window},
+    desktop::{
+        find_popup_root_surface, get_popup_toplevel_coords, PopupKind, PopupManager, Space, Window,
+    },
     input::{
         pointer::{Focus, GrabStartData as PointerGrabStartData},
         Seat,
@@ -34,6 +36,15 @@ impl XdgShellHandler for Smallvil {
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         let window = Window::new_wayland_window(surface);
+        if self.workspaces[self.cur_workspace].left_window == Option::None {
+            self.workspaces[self.cur_workspace].left_window = Some(window.clone());
+        } else if self.workspaces[self.cur_workspace].top_window == Option::None {
+            self.workspaces[self.cur_workspace].top_window = Some(window.clone());
+        } else if self.workspaces[self.cur_workspace].right_window == Option::None {
+            self.workspaces[self.cur_workspace].right_window = Some(window.clone());
+        } else if self.workspaces[self.cur_workspace].bottom_window == Option::None {
+            self.workspaces[self.cur_workspace].bottom_window = Some(window.clone());
+        }
         self.space.map_element(window, (0, 0), false);
     }
 
@@ -42,7 +53,12 @@ impl XdgShellHandler for Smallvil {
         let _ = self.popups.track_popup(PopupKind::Xdg(surface));
     }
 
-    fn reposition_request(&mut self, surface: PopupSurface, positioner: PositionerState, token: u32) {
+    fn reposition_request(
+        &mut self,
+        surface: PopupSurface,
+        positioner: PositionerState,
+        token: u32,
+    ) {
         surface.with_pending_state(|state| {
             let geometry = positioner.get_geometry();
             state.geometry = geometry;
