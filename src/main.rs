@@ -2,7 +2,6 @@
 
 mod cursor;
 mod drawing;
-mod grabs;
 mod handlers;
 mod input;
 mod state;
