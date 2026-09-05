@@ -2,24 +2,21 @@
 
 mod cursor;
 mod drawing;
-mod handlers;
 mod grabs;
+mod handlers;
 mod input;
 mod state;
 mod udev;
 mod winit;
 
-use std::{
-    collections::HashMap,
-    sync::atomic::Ordering,
-    time::Duration,
-};
+use std::{collections::HashMap, sync::atomic::Ordering, time::Duration};
+use tracing::{error, info};
 
 use smithay::{
     backend::{
         drm::{DrmNode, NodeType},
         egl::context::ContextPriority,
-        input::{InputEvent},
+        input::InputEvent,
         libinput::{LibinputInputBackend, LibinputSessionInterface},
         renderer::{
             multigpu::{gbm::GbmGlesBackend, GpuManager},
@@ -28,8 +25,8 @@ use smithay::{
         session::{libseat::LibSeatSession, Event as SessionEvent, Session},
         udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent},
     },
-    reexports::input::{DeviceCapability, Libinput},
     reexports::calloop::EventLoop,
+    reexports::input::{DeviceCapability, Libinput},
     wayland::{
         dmabuf::{DmabufFeedbackBuilder, DmabufState},
         drm_syncobj::{supports_syncobj_eventfd, DrmSyncobjState},
@@ -43,7 +40,9 @@ use udev::{get_surface_dmabuf_feedback, DeviceAddError};
 
 fn print_help() {
     println!("- `winnit` - Start windowed");
-    println!("- `tty-udev` - Start on a tty using the udev backend (requires root if without logind)");
+    println!(
+        "- `tty-udev` - Start on a tty using the udev backend (requires root if without logind)"
+    );
     println!("- `help` - Show this help message");
 }
 
@@ -124,7 +123,7 @@ fn run_udev() {
                     .expect("No GPU!")
             })
     };
-    println!("Using {} as primary gpu.", primary_gpu);
+    info!("Using {} as primary gpu.", primary_gpu);
 
     let gpus =
         GpuManager::new(GbmGlesBackend::with_context_priority(ContextPriority::High)).unwrap();
@@ -150,7 +149,7 @@ fn run_udev() {
     let udev_backend = match UdevBackend::new(&state.seat_name) {
         Ok(ret) => ret,
         Err(err) => {
-            eprintln!("Failed to initialize udev backend: {}", err);
+            error!("Failed to initialize udev backend: {}", err);
             return;
         }
     };
@@ -159,13 +158,7 @@ fn run_udev() {
      * Initialize libinput backend
      */
     let mut libinput_context = Libinput::new_with_udev::<LibinputSessionInterface<LibSeatSession>>(
-        state
-            .backend_data
-            .as_ref()
-            .unwrap()
-            .session
-            .clone()
-            .into(),
+        state.backend_data.as_ref().unwrap().session.clone().into(),
     );
     libinput_context.udev_assign_seat(&state.seat_name).unwrap();
     let libinput_backend = LibinputInputBackend::new(libinput_context.clone());
@@ -175,75 +168,80 @@ fn run_udev() {
      */
     event_loop
         .handle()
-        .insert_source(libinput_backend, move |mut event, _, data: &mut Smallvil| {
-            if let InputEvent::DeviceAdded { device } = &mut event {
-                if device.has_capability(DeviceCapability::Keyboard) {
-                    if let Some(led_state) = data
-                        .seat
-                        .get_keyboard()
-                        .map(|keyboard| keyboard.led_state())
-                    {
-                        device.led_update(led_state.into());
+        .insert_source(
+            libinput_backend,
+            move |mut event, _, data: &mut Smallvil| {
+                if let InputEvent::DeviceAdded { device } = &mut event {
+                    if device.has_capability(DeviceCapability::Keyboard) {
+                        if let Some(led_state) = data
+                            .seat
+                            .get_keyboard()
+                            .map(|keyboard| keyboard.led_state())
+                        {
+                            device.led_update(led_state.into());
+                        }
+                        if let Some(backend) = data.backend_data.as_mut() {
+                            backend.keyboards.push(device.clone());
+                        }
                     }
-                    if let Some(backend) = data.backend_data.as_mut() {
-                        backend.keyboards.push(device.clone());
+                } else if let InputEvent::DeviceRemoved { ref device } = event {
+                    if device.has_capability(DeviceCapability::Keyboard) {
+                        if let Some(backend) = data.backend_data.as_mut() {
+                            backend.keyboards.retain(|item| item != device);
+                        }
                     }
                 }
-            } else if let InputEvent::DeviceRemoved { ref device } = event {
-                if device.has_capability(DeviceCapability::Keyboard) {
-                    if let Some(backend) = data.backend_data.as_mut() {
-                        backend.keyboards.retain(|item| item != device);
-                    }
-                }
-            }
 
-            data.process_input_event(event)
-        })
+                data.process_input_event(event)
+            },
+        )
         .unwrap();
 
     event_loop
         .handle()
-        .insert_source(notifier, move |event, &mut (), data: &mut Smallvil| match event {
-            SessionEvent::PauseSession => {
-                libinput_context.suspend();
-                println!("pausing session");
+        .insert_source(
+            notifier,
+            move |event, &mut (), data: &mut Smallvil| match event {
+                SessionEvent::PauseSession => {
+                    libinput_context.suspend();
+                    info!("pausing session");
 
-                if let Some(backend_data) = data.backend_data.as_mut() {
-                    for backend in backend_data.backends.values_mut() {
-                        backend.drm_output_manager.pause();
+                    if let Some(backend_data) = data.backend_data.as_mut() {
+                        for backend in backend_data.backends.values_mut() {
+                            backend.drm_output_manager.pause();
+                        }
                     }
                 }
-            }
-            SessionEvent::ActivateSession => {
-                println!("resuming session");
+                SessionEvent::ActivateSession => {
+                    info!("resuming session");
 
-                if let Err(err) = libinput_context.resume() {
-                    eprintln!("Failed to resume libinput context: {:?}", err);
-                }
-                if let Some(backend_data) = data.backend_data.as_mut() {
-                    for (node, backend) in backend_data
-                        .backends
-                        .iter_mut()
-                        .map(|(handle, backend)| (*handle, backend))
-                    {
-                        // if we do not care about flicking (caused by modesetting) we could just
-                        // pass true for disable connectors here. this would make sure our drm
-                        // device is in a known state (all connectors and planes disabled).
-                        // but for demonstration we choose a more optimistic path by leaving the
-                        // state as is and assume it will just work. If this assumption fails
-                        // we will try to reset the state when trying to queue a frame.
-                        backend
-                            .drm_output_manager
-                            .activate(false)
-                            .expect("failed to activate drm backend");
-                        data.handle
-                            .insert_idle(move |data: &mut Smallvil| {
+                    if let Err(err) = libinput_context.resume() {
+                        error!("Failed to resume libinput context: {:?}", err);
+                    }
+                    if let Some(backend_data) = data.backend_data.as_mut() {
+                        for (node, backend) in backend_data
+                            .backends
+                            .iter_mut()
+                            .map(|(handle, backend)| (*handle, backend))
+                        {
+                            // if we do not care about flicking (caused by modesetting) we could just
+                            // pass true for disable connectors here. this would make sure our drm
+                            // device is in a known state (all connectors and planes disabled).
+                            // but for demonstration we choose a more optimistic path by leaving the
+                            // state as is and assume it will just work. If this assumption fails
+                            // we will try to reset the state when trying to queue a frame.
+                            backend
+                                .drm_output_manager
+                                .activate(false)
+                                .expect("failed to activate drm backend");
+                            data.handle.insert_idle(move |data: &mut Smallvil| {
                                 data.render(node, None, data.clock.now())
                             });
+                        }
                     }
                 }
-            }
-        })
+            },
+        )
         .unwrap();
 
     // We try to initialize the primary node before others to make sure
@@ -275,7 +273,7 @@ fn run_udev() {
             .map_err(DeviceAddError::DrmNode)
             .and_then(|node| state.device_added(node, path))
         {
-            eprintln!("Skipping device {device_id}: {err}");
+            error!("Skipping device {device_id}: {err}");
         }
     }
     state.shm_state.update_formats(
@@ -297,13 +295,13 @@ fn run_udev() {
         .single_renderer(&primary_gpu)
         .unwrap();
 
-    println!(
+    info!(
         "Trying to initialize EGL Hardware Acceleration for {:?}",
         primary_gpu
     );
     match renderer.bind_wl_display(&display_handle) {
-        Ok(_) => println!("EGL hardware-acceleration enabled"),
-        Err(err) => println!("Failed to initialize EGL hardware-acceleration: {:?}", err),
+        Ok(_) => info!("EGL hardware-acceleration enabled"),
+        Err(err) => info!("Failed to initialize EGL hardware-acceleration: {:?}", err),
     }
 
     // init dmabuf support with format list from our primary gpu
@@ -312,10 +310,8 @@ fn run_udev() {
         .build()
         .unwrap();
     let mut dmabuf_state = DmabufState::new();
-    let global = dmabuf_state.create_global_with_default_feedback::<Smallvil>(
-        &display_handle,
-        &default_feedback,
-    );
+    let global = dmabuf_state
+        .create_global_with_default_feedback::<Smallvil>(&display_handle, &default_feedback);
     state.backend_data.as_mut().unwrap().dmabuf_state = Some((dmabuf_state, global));
 
     let backend_data = state.backend_data.as_mut().unwrap();
@@ -367,26 +363,29 @@ fn run_udev() {
 
     event_loop
         .handle()
-        .insert_source(udev_backend, move |event, _, data: &mut Smallvil| match event {
-            UdevEvent::Added { device_id, path } => {
-                if let Err(err) = DrmNode::from_dev_id(device_id)
-                    .map_err(DeviceAddError::DrmNode)
-                    .and_then(|node| data.device_added(node, &path))
-                {
-                    eprintln!("Skipping device {device_id}: {err}");
+        .insert_source(
+            udev_backend,
+            move |event, _, data: &mut Smallvil| match event {
+                UdevEvent::Added { device_id, path } => {
+                    if let Err(err) = DrmNode::from_dev_id(device_id)
+                        .map_err(DeviceAddError::DrmNode)
+                        .and_then(|node| data.device_added(node, &path))
+                    {
+                        error!("Skipping device {device_id}: {err}");
+                    }
                 }
-            }
-            UdevEvent::Changed { device_id } => {
-                if let Ok(node) = DrmNode::from_dev_id(device_id) {
-                    data.device_changed(node)
+                UdevEvent::Changed { device_id } => {
+                    if let Ok(node) = DrmNode::from_dev_id(device_id) {
+                        data.device_changed(node)
+                    }
                 }
-            }
-            UdevEvent::Removed { device_id } => {
-                if let Ok(node) = DrmNode::from_dev_id(device_id) {
-                    data.device_removed(node)
+                UdevEvent::Removed { device_id } => {
+                    if let Ok(node) = DrmNode::from_dev_id(device_id) {
+                        data.device_removed(node)
+                    }
                 }
-            }
-        })
+            },
+        )
         .unwrap();
 
     /*

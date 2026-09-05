@@ -17,6 +17,7 @@ use smithay::{
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Point, SERIAL_COUNTER},
 };
+use tracing::{error, info};
 
 use crate::state::Smallvil;
 
@@ -41,20 +42,21 @@ fn parse_pressed_key(
     handle: smithay::input::keyboard::KeysymHandle<'_>,
 ) -> FilterResult<Action> {
     let sym = handle.modified_sym();
-    println!("Parsing keyboard event {:?}", sym.name());
-    if modifiers.alt {
-        // ctrl+alt+Fx switches to the corresponding virtual terminal
-        if modifiers.alt
-            && (xkb::KEY_XF86Switch_VT_1..=xkb::KEY_XF86Switch_VT_12).contains(&sym.raw())
-        {
-            return FilterResult::Intercept(Action::VtSwitch(
-                (sym.raw() - xkb::KEY_XF86Switch_VT_1 + 1) as i32,
-            ));
-        }
+    info!("Parsing keyboard event {:?}", sym.name());
+    // ctrl+alt+Fx switches to the corresponding virtual terminal
+    if modifiers.alt
+        && modifiers.ctrl
+        && (xkb::KEY_XF86Switch_VT_1..=xkb::KEY_XF86Switch_VT_12).contains(&sym.raw())
+    {
+        return FilterResult::Intercept(Action::VtSwitch(
+            (sym.raw() - xkb::KEY_XF86Switch_VT_1 + 1) as i32,
+        ));
+    }
+    if modifiers.alt || modifiers.logo {
         match sym {
-            Keysym::Escape => FilterResult::Intercept(Action::Quit),
-            Keysym::F => FilterResult::Intercept(Action::SpawnCommand("firefox")),
-            Keysym::G => FilterResult::Intercept(Action::SpawnCommand("ghostty")),
+            Keysym::Tab => FilterResult::Intercept(Action::Quit),
+            Keysym::f => FilterResult::Intercept(Action::SpawnCommand("firefox")),
+            Keysym::g => FilterResult::Intercept(Action::SpawnCommand("ghostty")),
             _ => FilterResult::Forward,
         }
     } else {
@@ -89,14 +91,14 @@ fn position_windows(s: &mut Smallvil) {
 }
 
 fn spawn_command(state: &mut Smallvil, command: &str) {
-    println!("Spawning command {}", command);
+    info!("Spawning command {}", command);
     let res = std::process::Command::new(command)
         .env("WAYLAND_DISPLAY", state.socket_name.clone()) // TODO: Do not use clone if possible
         .stdout(std::process::Stdio::null())
         .stdin(std::process::Stdio::null())
         .spawn();
     if let Err(e) = res {
-        println!("Failed to spawn {}", e);
+        error!("Failed to spawn {}", e);
     }
 }
 
@@ -104,15 +106,15 @@ fn handle_key_action(state: &mut Smallvil, action: Action) {
     match action {
         Action::SpawnCommand(command) => spawn_command(state, command),
         Action::Quit => {
-            println!("Quitting");
+            info!("Quitting");
             state.running.store(false, Ordering::SeqCst);
             state.loop_signal.stop();
         }
         Action::VtSwitch(vt) => {
-            println!("Trying to switch to vt {}", vt);
+            info!("Trying to switch to vt {}", vt);
             if let Some(backend) = state.backend_data.as_mut() {
                 if let Err(err) = backend.session.change_vt(vt) {
-                    println!("Error switching vt: {}", err);
+                    error!("Error switching vt: {}", err);
                 }
             }
         }
@@ -126,7 +128,7 @@ impl Smallvil {
                 let serial = SERIAL_COUNTER.next_serial();
                 match self.seat.get_keyboard() {
                     Option::None => {
-                        eprintln!("Failed to get keybaord")
+                        error!("Failed to get keybaord")
                     }
                     Option::Some(keyboard) => {
                         let time = Event::time_msec(&event);
@@ -323,18 +325,18 @@ impl Smallvil {
     }
 
     fn on_gesture_swipe_begin<I: InputBackend>(&mut self, _event: I::GestureSwipeBeginEvent) {
-        println!("Gesture swipe begin event")
+        info!("Gesture swipe begin event")
     }
 
     fn on_gesture_swipe_update<I: InputBackend>(&mut self, event: I::GestureSwipeUpdateEvent) {
         self.pos += event.delta();
-        println!("Gesture swipe event");
-        // println!("Gesture swipe event pos: {}, delta: {}", self.pos, event.delta());
+        info!("Gesture swipe event");
+        // info!("Gesture swipe event pos: {}, delta: {}", self.pos, event.delta());
 
         position_windows(self)
     }
 
     fn on_gesture_swipe_end<I: InputBackend>(&mut self, _event: I::GestureSwipeEndEvent) {
-        println!("Gesture swipe end event")
+        info!("Gesture swipe end event")
     }
 }

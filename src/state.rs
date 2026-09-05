@@ -6,7 +6,8 @@ use std::{
 use smithay::{
     backend::{
         renderer::element::{
-            default_primary_scanout_output_compare, utils::select_dmabuf_feedback, RenderElementStates,
+            default_primary_scanout_output_compare, utils::select_dmabuf_feedback,
+            RenderElementStates,
         },
         session::Session,
     },
@@ -14,7 +15,8 @@ use smithay::{
     desktop::{
         utils::{
             surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
-            update_surface_primary_scanout_output, with_surfaces_surface_tree, OutputPresentationFeedback,
+            update_surface_primary_scanout_output, with_surfaces_surface_tree,
+            OutputPresentationFeedback,
         },
         PopupManager, Space, Window, WindowSurfaceType,
     },
@@ -47,11 +49,18 @@ use crate::udev::UdevData;
 
 #[derive(Clone)]
 pub struct SmallvilWorkspace {
-    pub left_window: Option< smithay::desktop::Window>,
-    pub top_window: Option< smithay::desktop::Window>,
-    pub right_window: Option< smithay::desktop::Window>,
-    pub bottom_window: Option< smithay::desktop::Window>,
+    pub left_window: Option<smithay::desktop::Window>,
+    pub top_window: Option<smithay::desktop::Window>,
+    pub right_window: Option<smithay::desktop::Window>,
+    pub bottom_window: Option<smithay::desktop::Window>,
 }
+
+pub const EMPTY_WORKSPACE: SmallvilWorkspace = SmallvilWorkspace {
+    left_window: Option::None,
+    top_window: Option::None,
+    right_window: Option::None,
+    bottom_window: Option::None,
+};
 
 #[derive(Debug)]
 pub struct DndIcon {
@@ -150,7 +159,7 @@ impl Smallvil {
 
         Self {
             cur_workspace: 0,
-            workspaces: Vec::new(),
+            workspaces: vec![EMPTY_WORKSPACE],
             pos: (0.0, 0.0).into(),
 
             start_time,
@@ -191,15 +200,18 @@ impl Smallvil {
         let socket_name = listening_socket.socket_name().to_os_string();
 
         handle
-            .insert_source(listening_socket, move |client_stream, _, state: &mut Smallvil| {
-                // Inside the callback, you should insert the client into the display.
-                //
-                // You may also associate some data with the client when inserting the client.
-                state
-                    .display_handle
-                    .insert_client(client_stream, Arc::new(ClientState::default()))
-                    .unwrap();
-            })
+            .insert_source(
+                listening_socket,
+                move |client_stream, _, state: &mut Smallvil| {
+                    // Inside the callback, you should insert the client into the display.
+                    //
+                    // You may also associate some data with the client when inserting the client.
+                    state
+                        .display_handle
+                        .insert_client(client_stream, Arc::new(ClientState::default()))
+                        .unwrap();
+                },
+            )
             .expect("Failed to init the wayland event source.");
 
         // You also need to add the display itself to the event loop, so that client events will be processed by wayland-server.
@@ -248,14 +260,18 @@ impl Smallvil {
             if self.space.outputs_for_element(window).contains(output) {
                 window.send_frame(output, time, throttle, surface_primary_scanout_output);
                 if let Some(dmabuf_feedback) = dmabuf_feedback.as_ref() {
-                    window.send_dmabuf_feedback(output, surface_primary_scanout_output, |surface, _| {
-                        select_dmabuf_feedback(
-                            surface,
-                            render_element_states,
-                            &dmabuf_feedback.render_feedback,
-                            &dmabuf_feedback.scanout_feedback,
-                        )
-                    });
+                    window.send_dmabuf_feedback(
+                        output,
+                        surface_primary_scanout_output,
+                        |surface, _| {
+                            select_dmabuf_feedback(
+                                surface,
+                                render_element_states,
+                                &dmabuf_feedback.render_feedback,
+                                &dmabuf_feedback.scanout_feedback,
+                            )
+                        },
+                    );
                 }
             }
         }
