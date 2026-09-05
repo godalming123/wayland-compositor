@@ -22,9 +22,9 @@ use crate::state::Smallvil;
 
 /// Possible results of a keyboard action
 enum Action {
-    SpawnFirefox,  // Spawn firefox
-    Quit,          // Quit the compositor
-    VtSwitch(i32), // Trigger a vt-switch
+    SpawnCommand(&'static str), // Spawn a command
+    Quit,                       // Quit the compositor
+    VtSwitch(i32),              // Trigger a vt-switch
 }
 
 fn parse_released_key(
@@ -53,7 +53,8 @@ fn parse_pressed_key(
         }
         match sym {
             Keysym::Escape => FilterResult::Intercept(Action::Quit),
-            Keysym::F => FilterResult::Intercept(Action::SpawnFirefox),
+            Keysym::F => FilterResult::Intercept(Action::SpawnCommand("firefox")),
+            Keysym::G => FilterResult::Intercept(Action::SpawnCommand("ghostty")),
             _ => FilterResult::Forward,
         }
     } else {
@@ -87,9 +88,9 @@ fn position_windows(s: &mut Smallvil) {
     }
 }
 
-fn spawn_firefox(state: &mut Smallvil) {
-    println!("Spawning firefox");
-    let res = std::process::Command::new("firefox")
+fn spawn_command(state: &mut Smallvil, command: &str) {
+    println!("Spawning command {}", command);
+    let res = std::process::Command::new(command)
         .env("WAYLAND_DISPLAY", state.socket_name.clone()) // TODO: Do not use clone if possible
         .stdout(std::process::Stdio::null())
         .stdin(std::process::Stdio::null())
@@ -101,7 +102,7 @@ fn spawn_firefox(state: &mut Smallvil) {
 
 fn handle_key_action(state: &mut Smallvil, action: Action) {
     match action {
-        Action::SpawnFirefox => spawn_firefox(state),
+        Action::SpawnCommand(command) => spawn_command(state, command),
         Action::Quit => {
             println!("Quitting");
             state.running.store(false, Ordering::SeqCst);
