@@ -17,7 +17,7 @@ use smithay::{
     reexports::wayland_server::protocol::wl_surface::WlSurface,
     utils::{Logical, Point, SERIAL_COUNTER},
 };
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::state::Smallvil;
 
@@ -64,36 +64,142 @@ fn parse_pressed_key(
     }
 }
 
+const fn logical<T>(x: T, y: T) -> Point<T, Logical> {
+    return Point::<T, Logical>::new(x, y);
+}
+
+const PADDING: Point<i32, Logical> = logical(50, 50);
+
+fn get_line_intersection(
+    gradient0: f64,
+    intercept0: f64,
+    gradient1: f64,
+    intercept1: f64,
+) -> Point<f64, Logical> {
+    let x = (intercept0 - intercept1) / (gradient1 - gradient0);
+    let y = gradient0 * x + intercept0;
+    return logical(x, y);
+}
+
+fn get_y_intercept(gradient: f64, point_on_line: Point<f64, Logical>) -> f64 {
+    return point_on_line.y - (gradient * point_on_line.x);
+}
+
+fn get_left_right_top_bottom(
+    a: Point<f64, Logical>,
+    b: Point<f64, Logical>,
+) -> (
+    Point<f64, Logical>,
+    Point<f64, Logical>,
+    Point<f64, Logical>,
+    Point<f64, Logical>,
+) {
+    let (left, right) = if a.x < b.x { (a, b) } else { (b, a) };
+    let (top, bottom) = if a.y < b.y { (a, b) } else { (b, a) };
+    (left, right, top, bottom)
+}
+
+fn rubber_band_delta(delta: f64, container_size: f64) -> f64 {
+    // let out_abs = (delta.abs() + 1.0).powf(0.8) - 1.0;
+    // let out_abs = (delta.abs() + 1.0).log10() - 1.0;
+    let out_abs = (1.0 - (1.0 / ((delta.abs() * 0.55 / container_size) + 1.0))) * container_size;
+    if delta > 0.0 {
+        out_abs
+    } else {
+        -out_abs
+    }
+}
+
+fn clamp_to_point(
+    clamp_to: Point<f64, Logical>,
+    point_to_clamp: Point<f64, Logical>,
+    container_size: f64,
+) -> Point<f64, Logical> {
+    let delta = point_to_clamp - clamp_to;
+    clamp_to
+        + logical(
+            rubber_band_delta(delta.x, container_size),
+            rubber_band_delta(delta.y, container_size),
+        )
+}
+
+fn distance(delta_x: f64, delta_y: f64) -> f64 {
+    return (delta_x * delta_x + delta_y * delta_y).sqrt();
+}
+
+fn clamp_to_line(
+    line_start: Point<f64, Logical>,
+    line_end: Point<f64, Logical>,
+    point_to_clamp: Point<f64, Logical>,
+) -> Point<f64, Logical> {
+    let delta_y = line_start.y - line_end.y;
+    let delta_x = line_start.x - line_end.x;
+    let clamped_to_line = if delta_y == 0.0 {
+        logical(point_to_clamp.x, line_start.y)
+    } else if delta_x == 0.0 {
+        logical(line_start.x, point_to_clamp.y)
+    } else {
+        let gradiant0 = delta_y / delta_x;
+        let gradient1 = -1.0 / gradiant0;
+        get_line_intersection(
+            gradiant0,
+            get_y_intercept(gradiant0, line_start),
+            gradient1,
+            get_y_intercept(gradient1, point_to_clamp),
+        )
+    };
+    let (left, right, top, bottom) = get_left_right_top_bottom(line_start, line_end);
+    if clamped_to_line.x < left.x {
+        clamp_to_point(left, clamped_to_line, distance(delta_x, delta_y))
+    } else if clamped_to_line.x > right.x {
+        clamp_to_point(right, clamped_to_line, distance(delta_x, delta_y))
+    } else if clamped_to_line.y < top.y {
+        clamp_to_point(top, clamped_to_line, distance(delta_x, delta_y))
+    } else if clamped_to_line.y > bottom.y {
+        clamp_to_point(bottom, clamped_to_line, distance(delta_x, delta_y))
+    } else {
+        clamped_to_line
+    }
+}
+
 fn position_windows(s: &mut Smallvil) {
-    let focussed_output = match s.focused_output() {
+    let output = match s.focused_output() {
         Option::Some(o) => o,
         Option::None => {
             return;
         }
     };
-    // TODO: Get dimensions of output in global compositor space
+    let output_geometry = match s.space.output_geometry(&output) {
+        Option::Some(geometry) => geometry,
+        Option::None => {
+            warn!("Failed to get output geometry");
+            return;
+        }
+    };
 
-    let left_position = s.pos;
-    let top_position = s.pos;
-    let right_position = s.pos;
-    let bottom_position = s.pos;
+    let center_pos = (output_geometry.loc + PADDING).to_f64();
+    let left_pos = (output_geometry.loc + logical(-output_geometry.size.w, 0) + PADDING).to_f64();
+    let top_pos = (output_geometry.loc + logical(0, -output_geometry.size.h) + PADDING).to_f64();
+    let right_pos = (output_geometry.loc + logical(output_geometry.size.w, 0) + PADDING).to_f64();
+    let bottom_pos = (output_geometry.loc + logical(0, output_geometry.size.h) + PADDING).to_f64();
+
+    let left_position = clamp_to_line(center_pos, left_pos, s.pos).to_i32_round();
+    let top_position = clamp_to_line(center_pos, top_pos, s.pos).to_i32_round();
+    let right_position = clamp_to_line(center_pos, right_pos, s.pos).to_i32_round();
+    let bottom_position = clamp_to_line(center_pos, bottom_pos, s.pos).to_i32_round();
 
     for workspace in &s.workspaces {
         if let Some(ref left) = workspace.left_window {
-            s.space
-                .map_element(left.clone(), left_position.to_i32_round(), false);
+            s.space.map_element(left.clone(), left_position, false);
         }
         if let Some(ref top) = workspace.top_window {
-            s.space
-                .map_element(top.clone(), top_position.to_i32_round(), false);
+            s.space.map_element(top.clone(), top_position, false);
         }
         if let Some(ref right) = workspace.right_window {
-            s.space
-                .map_element(right.clone(), right_position.to_i32_round(), false);
+            s.space.map_element(right.clone(), right_position, false);
         }
         if let Some(ref bottom) = workspace.bottom_window {
-            s.space
-                .map_element(bottom.clone(), bottom_position.to_i32_round(), false);
+            s.space.map_element(bottom.clone(), bottom_position, false);
         }
     }
 }
