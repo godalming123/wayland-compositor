@@ -44,6 +44,7 @@ use smithay::{
         socket::ListeningSocketSource,
     },
 };
+use tracing::warn;
 
 use crate::udev::UdevData;
 
@@ -76,6 +77,7 @@ pub struct SurfaceDmabufFeedback {
 
 pub struct Smallvil {
     pub cur_workspace: usize,
+    pub cur_monitor: usize,
     pub workspaces: Vec<SmallvilWorkspace>,
     pub pos: Point<f64, Logical>,
 
@@ -159,6 +161,7 @@ impl Smallvil {
 
         Self {
             cur_workspace: 0,
+            cur_monitor: 0,
             workspaces: vec![EMPTY_WORKSPACE],
             pos: (0.0, 0.0).into(),
 
@@ -242,6 +245,30 @@ impl Smallvil {
                     .surface_under(pos - location.to_f64(), WindowSurfaceType::ALL)
                     .map(|(s, p)| (s, (p + location).to_f64()))
             })
+    }
+
+    /// Updates the currently focused monitor to the output under the given pointer location.
+    pub fn update_cur_monitor(&mut self, location: Point<f64, Logical>) {
+        if let Some((index, _)) = self.space.outputs().enumerate().find(|(_, output)| {
+            self.space
+                .output_geometry(output)
+                .map(|geometry| geometry.contains(location.to_i32_round()))
+                .unwrap_or(false)
+        }) {
+            self.cur_monitor = index;
+        }
+    }
+
+    /// Returns the currently focused monitor, falling back to the first mapped output.
+    #[allow(dead_code)]
+    pub fn focused_output(&self) -> Option<Output> {
+        match self.space.outputs().nth(self.cur_monitor) {
+            Option::Some(output) => Option::Some(output.clone()),
+            Option::None => {
+                warn!("Failed to get focussed monitor");
+                Option::None
+            }
+        }
     }
 
     pub fn post_repaint(

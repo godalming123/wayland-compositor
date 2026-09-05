@@ -65,6 +65,14 @@ fn parse_pressed_key(
 }
 
 fn position_windows(s: &mut Smallvil) {
+    let focussed_output = match s.focused_output() {
+        Option::Some(o) => o,
+        Option::None => {
+            return;
+        }
+    };
+    // TODO: Get dimensions of output in global compositor space
+
     let left_position = s.pos;
     let top_position = s.pos;
     let right_position = s.pos;
@@ -162,6 +170,8 @@ impl Smallvil {
                 let location = self.clamp_coords(pointer.current_location() + event.delta());
                 let under = self.surface_under(location);
 
+                self.update_cur_monitor(location);
+
                 pointer.motion(
                     self,
                     under,
@@ -192,6 +202,8 @@ impl Smallvil {
 
                 let pointer = self.seat.get_pointer().unwrap();
                 let under = self.surface_under(location);
+
+                self.update_cur_monitor(location);
 
                 pointer.motion(
                     self,
