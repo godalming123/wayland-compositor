@@ -14,7 +14,7 @@ use smithay::{
     },
 };
 
-use crate::Smallvil;
+use crate::{state::EMPTY_WORKSPACE, Smallvil};
 
 impl XdgShellHandler for Smallvil {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -31,6 +31,10 @@ impl XdgShellHandler for Smallvil {
             self.workspaces[self.cur_workspace].right_window = Some(window.clone());
         } else if self.workspaces[self.cur_workspace].bottom_window.is_none() {
             self.workspaces[self.cur_workspace].bottom_window = Some(window.clone());
+        } else {
+            self.cur_workspace += 1;
+            self.workspaces.insert(self.cur_workspace, EMPTY_WORKSPACE);
+            self.workspaces[self.cur_workspace].left_window = Some(window.clone());
         }
         self.space.map_element(window, (0, 0), false);
     }

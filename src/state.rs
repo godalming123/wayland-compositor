@@ -1,6 +1,7 @@
 use std::{
     ffi::OsString,
     sync::{atomic::AtomicBool, Arc},
+    time::{Duration, SystemTime},
 };
 
 use smithay::{
@@ -32,7 +33,7 @@ use smithay::{
             Display, DisplayHandle,
         },
     },
-    utils::{Clock, Logical, Monotonic, Point},
+    utils::{Clock, Coordinate, Logical, Monotonic, Point, Rectangle},
     wayland::{
         compositor::{CompositorClientState, CompositorState},
         dmabuf::DmabufFeedback,
@@ -46,7 +47,10 @@ use smithay::{
 };
 use tracing::warn;
 
-use crate::udev::UdevData;
+use crate::{
+    input::{get_pos, logical},
+    udev::UdevData,
+};
 
 #[derive(Clone)]
 pub struct SmallvilWorkspace {
@@ -63,6 +67,13 @@ pub const EMPTY_WORKSPACE: SmallvilWorkspace = SmallvilWorkspace {
     bottom_window: Option::None,
 };
 
+pub enum WindowPosition {
+    Left,
+    Top,
+    Right,
+    Bottom,
+}
+
 #[derive(Debug)]
 pub struct DndIcon {
     pub surface: WlSurface,
@@ -75,11 +86,53 @@ pub struct SurfaceDmabufFeedback {
     pub scanout_feedback: DmabufFeedback,
 }
 
+pub struct AnimationInfo {
+    pub start_time: SystemTime,
+    pub start_pos: Point<f64, Logical>,
+    pub start_velocity: Point<f64, Logical>,
+    pub end_pos: WindowPosition,
+}
+
+const NANOS_PER_SEC: u32 = 1_000_000_000;
+
+fn get_progress(d: Duration) -> f64 {
+    if d.as_secs() > 1 {
+        1.0
+    } else {
+        d.subsec_nanos().to_f64() / NANOS_PER_SEC.to_f64()
+    }
+}
+
+// TODO: Return the actual velocity
+// TODO: Take info.start_velocity into account
+// TODO: Ease animation in and out rather than having a constant velocity
+pub fn get_pos_and_velocity(
+    info: &AnimationInfo,
+    output_geoemetry: Rectangle<i32, Logical>,
+) -> (Point<f64, Logical>, Point<f64, Logical>) {
+    let now = SystemTime::now();
+    let progress = get_progress(now.duration_since(info.start_time).unwrap());
+    let end_pos = get_pos(output_geoemetry, &info.end_pos);
+    (
+        logical(
+            info.start_pos.x * (1.0 - progress) + end_pos.x * progress,
+            info.start_pos.y * (1.0 - progress) + end_pos.y * progress,
+        ),
+        logical(10.0, 10.0),
+    )
+}
+
+pub enum WorkspaceState {
+    WindowFocussed(WindowPosition),
+    Animating(AnimationInfo),
+    Grabbed(Point<f64, Logical>),
+}
+
 pub struct Smallvil {
     pub cur_workspace: usize,
+    pub cur_workspace_state: WorkspaceState,
     pub cur_monitor: usize,
     pub workspaces: Vec<SmallvilWorkspace>,
-    pub pos: Point<f64, Logical>,
 
     pub start_time: std::time::Instant,
     pub socket_name: OsString,
@@ -161,9 +214,9 @@ impl Smallvil {
 
         Self {
             cur_workspace: 0,
+            cur_workspace_state: WorkspaceState::WindowFocussed(WindowPosition::Left),
             cur_monitor: 0,
             workspaces: vec![EMPTY_WORKSPACE],
-            pos: (0.0, 0.0).into(),
 
             start_time,
             display_handle: dh,
@@ -260,7 +313,6 @@ impl Smallvil {
     }
 
     /// Returns the currently focused monitor, falling back to the first mapped output.
-    #[allow(dead_code)]
     pub fn focused_output(&self) -> Option<Output> {
         match self.space.outputs().nth(self.cur_monitor) {
             Option::Some(output) => Option::Some(output.clone()),
@@ -268,6 +320,19 @@ impl Smallvil {
                 warn!("Failed to get focussed monitor");
                 Option::None
             }
+        }
+    }
+
+    pub fn focussed_output_geometry(&self) -> Option<smithay::utils::Rectangle<i32, Logical>> {
+        match self.focused_output() {
+            Option::Some(output) => match self.space.output_geometry(&output) {
+                Option::Some(geometry) => Option::Some(geometry),
+                Option::None => {
+                    warn!("Failed to get output geometry");
+                    Option::None
+                }
+            },
+            Option::None => Option::None,
         }
     }
 
