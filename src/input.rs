@@ -258,6 +258,7 @@ fn spawn_command(state: &mut Smallvil, command: &str) {
 }
 
 fn handle_key_action(state: &mut Smallvil, action: Action) {
+    info!("Handling key action");
     match action {
         Action::SpawnCommand(command) => spawn_command(state, command),
         Action::FocusInDirection(direction) => {
@@ -269,6 +270,7 @@ fn handle_key_action(state: &mut Smallvil, action: Action) {
                 WorkspaceState::Grabbed(_pos) => {}
                 WorkspaceState::WindowFocussed(ref window) => {
                     let pos = get_pos(output_geometry, window);
+                    info!("Animating 1");
                     state.cur_workspace_state = WorkspaceState::Animating(AnimationInfo {
                         start_time: SystemTime::now(),
                         start_pos: pos,
@@ -277,7 +279,7 @@ fn handle_key_action(state: &mut Smallvil, action: Action) {
                     });
                 }
                 WorkspaceState::Animating(ref info) => {
-                    let (pos, velocity) = get_pos_and_velocity(info, output_geometry);
+                    let (pos, velocity, _finished) = get_pos_and_velocity(info, output_geometry);
                     state.cur_workspace_state = WorkspaceState::Animating(AnimationInfo {
                         start_time: SystemTime::now(),
                         start_pos: pos,
@@ -549,6 +551,7 @@ impl Smallvil {
         } else {
             WindowPosition::Bottom
         };
+        info!("Animating 3");
         self.cur_workspace_state = WorkspaceState::Animating(AnimationInfo {
             start_time: SystemTime::now(),
             start_pos: pos,

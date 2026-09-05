@@ -45,7 +45,7 @@ use smithay::{
         socket::ListeningSocketSource,
     },
 };
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::{
     input::{get_pos, logical},
@@ -94,13 +94,13 @@ pub struct AnimationInfo {
     pub end_pos: WindowPosition,
 }
 
-const NANOS_PER_SEC: u32 = 1_000_000_000;
+const ANIMATION_MS: f64 = 300.0;
 
-pub fn get_progress(d: Duration) -> f64 {
+fn get_progress(d: Duration) -> f64 {
     if d.as_secs() > 1 {
         1.0
     } else {
-        d.subsec_nanos().to_f64() / NANOS_PER_SEC.to_f64()
+        d.subsec_millis().to_f64() / ANIMATION_MS
     }
 }
 
@@ -110,7 +110,7 @@ pub fn get_progress(d: Duration) -> f64 {
 pub fn get_pos_and_velocity(
     info: &AnimationInfo,
     output_geoemetry: Rectangle<i32, Logical>,
-) -> (Point<f64, Logical>, Point<f64, Logical>) {
+) -> (Point<f64, Logical>, Point<f64, Logical>, bool) {
     let now = SystemTime::now();
     let progress = get_progress(now.duration_since(info.start_time).unwrap());
     let end_pos = get_pos(output_geoemetry, &info.end_pos);
@@ -120,6 +120,7 @@ pub fn get_pos_and_velocity(
             info.start_pos.y * (1.0 - progress) + end_pos.y * progress,
         ),
         logical(10.0, 10.0),
+        progress >= 1.0,
     )
 }
 
@@ -436,10 +437,9 @@ impl Smallvil {
         let pos = match &self.cur_workspace_state {
             WorkspaceState::WindowFocussed(window) => get_pos(output_geometry, window),
             WorkspaceState::Animating(info) => {
-                let progress =
-                    get_progress(SystemTime::now().duration_since(info.start_time).unwrap());
-                let (pos, _velocity) = get_pos_and_velocity(info, output_geometry);
-                if progress >= 1.0 {
+                let (pos, _velocity, finished) = get_pos_and_velocity(info, output_geometry);
+                if finished {
+                    info!("Finished animation");
                     self.cur_workspace_state = WorkspaceState::WindowFocussed(info.end_pos);
                 }
                 pos
