@@ -84,6 +84,7 @@ pub const PADDING: i32 = 10;
 pub const MARGIN: i32 = 50;
 pub const MARGIN_POS: Point<i32, Logical> = logical(MARGIN, MARGIN);
 
+/*
 fn get_line_intersection(
     gradient0: f64,
     intercept0: f64,
@@ -112,6 +113,7 @@ fn get_left_right_top_bottom_for_points(
     let (top, bottom) = if a.y < b.y { (a, b) } else { (b, a) };
     (left, right, top, bottom)
 }
+*/
 
 fn rubber_band_delta(delta: f64, container_size: f64) -> f64 {
     // let out_abs = (delta.abs() + 1.0).powf(0.8) - 1.0;
@@ -124,6 +126,7 @@ fn rubber_band_delta(delta: f64, container_size: f64) -> f64 {
     }
 }
 
+/*
 fn clamp_to_point(
     clamp_to: Point<f64, Logical>,
     point_to_clamp: Point<f64, Logical>,
@@ -136,56 +139,55 @@ fn clamp_to_point(
             rubber_band_delta(delta.y, container_size),
         )
 }
+*/
 
-fn distance_from_points(a: Point<f64, Logical>, b: Point<f64, Logical>) -> f64 {
-    distance_from_delta(a.x - b.x, a.y - b.y)
+fn distance(a: Point<f64, Logical>, b: Point<f64, Logical>) -> f64 {
+    let delta_x = a.x - b.x;
+    let delta_y = a.y - b.y;
+    (delta_x * delta_x + delta_y * delta_y).sqrt()
 }
 
-fn distance_from_delta(delta_x: f64, delta_y: f64) -> f64 {
-    return (delta_x * delta_x + delta_y * delta_y).sqrt();
+fn between(
+    a: Point<f64, Logical>,
+    b: Point<f64, Logical>,
+    b_proportion: f64,
+) -> Point<f64, Logical> {
+    let a_proportion = 1.0 - b_proportion;
+    logical(
+        a.x * a_proportion + b.x * b_proportion,
+        a.y * a_proportion + b.y * b_proportion,
+    )
 }
 
 fn clamp_to_line(
-    line_start: Point<f64, Logical>,
-    line_end: Point<f64, Logical>,
-    point_to_clamp: Point<f64, Logical>,
+    start: Point<f64, Logical>,
+    end: Point<f64, Logical>,
+    portion_along: f64,
 ) -> Point<f64, Logical> {
-    let delta_y = line_start.y - line_end.y;
-    let delta_x = line_start.x - line_end.x;
-    let clamped_to_line = if delta_y == 0.0 {
-        logical(point_to_clamp.x, line_start.y)
-    } else if delta_x == 0.0 {
-        logical(line_start.x, point_to_clamp.y)
-    } else {
-        let gradiant0 = delta_y / delta_x;
-        let gradient1 = -1.0 / gradiant0;
-        get_line_intersection(
-            gradiant0,
-            get_y_intercept(gradiant0, line_start),
-            gradient1,
-            get_y_intercept(gradient1, point_to_clamp),
-        )
-    };
-    let (left, right, top, bottom) = get_left_right_top_bottom_for_points(line_start, line_end);
+    assert!(portion_along >= 0.0);
+    /*
+    let restricted_portion_along = rubber_band_delta(portion_along, 1.0);
+    */
+    let restricted_portion_along = portion_along.min(1.0);
+    info!(
+        "Portion along: {}, restricted portion along: {}",
+        portion_along, restricted_portion_along
+    );
+    between(start, end, restricted_portion_along)
+    /*
+    let (left, right, top, bottom) = get_left_right_top_bottom_for_points(start, end);
     if clamped_to_line.x < left.x {
-        clamp_to_point(left, clamped_to_line, distance_from_delta(delta_x, delta_y))
+        clamp_to_point(left, clamped_to_line, distance(start, end))
     } else if clamped_to_line.x > right.x {
-        clamp_to_point(
-            right,
-            clamped_to_line,
-            distance_from_delta(delta_x, delta_y),
-        )
+        clamp_to_point(right, clamped_to_line, distance(start, end))
     } else if clamped_to_line.y < top.y {
-        clamp_to_point(top, clamped_to_line, distance_from_delta(delta_x, delta_y))
+        clamp_to_point(top, clamped_to_line, distance(start, end))
     } else if clamped_to_line.y > bottom.y {
-        clamp_to_point(
-            bottom,
-            clamped_to_line,
-            distance_from_delta(delta_x, delta_y),
-        )
+        clamp_to_point(bottom, clamped_to_line, distance(start, end))
     } else {
         clamped_to_line
     }
+    */
 }
 
 fn get_left_top_right_bottom(
@@ -226,13 +228,28 @@ pub fn position_windows(s: &mut Smallvil, pos: Point<f64, Logical>) {
             return;
         }
     };
-    let center_pos = main_window_area.loc.to_f64();
-    let (left_pos, top_pos, right_pos, bottom_pos) = get_left_top_right_bottom(main_window_area);
 
-    let left_position = clamp_to_line(center_pos, left_pos, pos).to_i32_round();
-    let top_position = clamp_to_line(center_pos, top_pos, pos).to_i32_round();
-    let right_position = clamp_to_line(center_pos, right_pos, pos).to_i32_round();
-    let bottom_position = clamp_to_line(center_pos, bottom_pos, pos).to_i32_round();
+    let main_window_loc = main_window_area.loc.to_f64();
+    let delta = pos - main_window_loc;
+    let p = logical(
+        delta.x / (f64::from(main_window_area.size.w) + f64::from(PADDING)),
+        delta.y / (f64::from(main_window_area.size.h) + f64::from(PADDING)),
+    );
+
+    let (left_pos, top_pos, right_pos, bottom_pos) = get_left_top_right_bottom(main_window_area);
+    info!(
+        "p: {:?}, main_window_loc: {:?}, left_pos: {:?}",
+        p, main_window_loc, left_pos
+    );
+
+    let left_position =
+        clamp_to_line(main_window_loc, left_pos, distance(logical(-1.0, 0.0), p)).to_i32_round();
+    let top_position =
+        clamp_to_line(main_window_loc, top_pos, distance(logical(0.0, -1.0), p)).to_i32_round();
+    let right_position =
+        clamp_to_line(main_window_loc, right_pos, distance(logical(1.0, 0.0), p)).to_i32_round();
+    let bottom_position =
+        clamp_to_line(main_window_loc, bottom_pos, distance(logical(0.0, 1.0), p)).to_i32_round();
 
     // TODO: Find a more efficient way to unmap all elements
     while let Option::Some(element) = s.space.elements().last() {
@@ -612,10 +629,10 @@ impl Smallvil {
         };
         let (left, top, right, bottom) =
             get_left_top_right_bottom(self.main_window_area().unwrap());
-        let left_distance = distance_from_points(pos, left);
-        let top_distance = distance_from_points(pos, top);
-        let right_distance = distance_from_points(pos, right);
-        let bottom_distance = distance_from_points(pos, bottom);
+        let left_distance = distance(pos, left);
+        let top_distance = distance(pos, top);
+        let right_distance = distance(pos, right);
+        let bottom_distance = distance(pos, bottom);
         let end_pos = if left_distance <= top_distance
             && left_distance <= right_distance
             && left_distance <= bottom_distance
