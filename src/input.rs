@@ -10,12 +10,16 @@ use smithay::{
         },
         session::Session,
     },
+    desktop::{Space, Window},
     input::{
         keyboard::{keysyms as xkb, FilterResult, Keysym},
         pointer::{AxisFrame, ButtonEvent, MotionEvent},
     },
-    reexports::wayland_server::protocol::wl_surface::WlSurface,
-    utils::{Logical, Point, Rectangle, SERIAL_COUNTER},
+    reexports::{
+        wayland_protocols::xdg::shell::server::xdg_toplevel,
+        wayland_server::protocol::wl_surface::WlSurface,
+    },
+    utils::{Logical, Point, Rectangle, Size, SERIAL_COUNTER},
 };
 use tracing::{error, info, warn};
 
@@ -76,7 +80,9 @@ pub const fn logical<T>(x: T, y: T) -> Point<T, Logical> {
     return Point::<T, Logical>::new(x, y);
 }
 
-const PADDING: Point<i32, Logical> = logical(50, 50);
+pub const PADDING: i32 = 10;
+pub const MARGIN: i32 = 50;
+pub const MARGIN_POS: Point<i32, Logical> = logical(MARGIN, MARGIN);
 
 fn get_line_intersection(
     gradient0: f64,
@@ -183,17 +189,18 @@ fn clamp_to_line(
 }
 
 fn get_left_top_right_bottom(
-    output_geometry: Rectangle<i32, Logical>,
+    main_window_area: Rectangle<i32, Logical>,
 ) -> (
     Point<f64, Logical>,
     Point<f64, Logical>,
     Point<f64, Logical>,
     Point<f64, Logical>,
 ) {
-    let left_pos = (output_geometry.loc + logical(-output_geometry.size.w, 0) + PADDING).to_f64();
-    let top_pos = (output_geometry.loc + logical(0, -output_geometry.size.h) + PADDING).to_f64();
-    let right_pos = (output_geometry.loc + logical(output_geometry.size.w, 0) + PADDING).to_f64();
-    let bottom_pos = (output_geometry.loc + logical(0, output_geometry.size.h) + PADDING).to_f64();
+    let left_pos = (main_window_area.loc + logical(-main_window_area.size.w - PADDING, 0)).to_f64();
+    let top_pos = (main_window_area.loc + logical(0, -main_window_area.size.h - PADDING)).to_f64();
+    let right_pos = (main_window_area.loc + logical(main_window_area.size.w + PADDING, 0)).to_f64();
+    let bottom_pos =
+        (main_window_area.loc + logical(0, main_window_area.size.h + PADDING)).to_f64();
 
     (left_pos, top_pos, right_pos, bottom_pos)
 }
@@ -212,15 +219,15 @@ pub fn get_pos(
 }
 
 pub fn position_windows(s: &mut Smallvil, pos: Point<f64, Logical>) {
-    let output_geometry = match s.focussed_output_geometry() {
+    let main_window_area = match s.main_window_area() {
         Option::Some(o) => o,
         Option::None => {
             warn!("Failed to get output geometry");
             return;
         }
     };
-    let center_pos = (output_geometry.loc + PADDING).to_f64();
-    let (left_pos, top_pos, right_pos, bottom_pos) = get_left_top_right_bottom(output_geometry);
+    let center_pos = main_window_area.loc.to_f64();
+    let (left_pos, top_pos, right_pos, bottom_pos) = get_left_top_right_bottom(main_window_area);
 
     let left_position = clamp_to_line(center_pos, left_pos, pos).to_i32_round();
     let top_position = clamp_to_line(center_pos, top_pos, pos).to_i32_round();
@@ -232,18 +239,35 @@ pub fn position_windows(s: &mut Smallvil, pos: Point<f64, Logical>) {
         s.space.unmap_elem(&element.clone());
     }
 
+    fn handle_window(
+        space: &mut Space<Window>,
+        window: &Window,
+        pos: Point<i32, Logical>,
+        size: Size<i32, Logical>,
+    ) {
+        space.map_element(window.clone(), pos, false);
+        if window.geometry().size != size {
+            let xdg = window.toplevel().unwrap();
+            xdg.with_pending_state(|state| {
+                state.states.set(xdg_toplevel::State::Resizing);
+                state.size = Option::Some(size);
+            });
+            xdg.send_pending_configure();
+        };
+    }
+
     let workspace = &s.workspaces[s.cur_workspace];
     if let Some(ref left) = workspace.left_window {
-        s.space.map_element(left.clone(), left_position, false);
+        handle_window(&mut s.space, left, left_position, main_window_area.size);
     }
     if let Some(ref top) = workspace.top_window {
-        s.space.map_element(top.clone(), top_position, false);
+        handle_window(&mut s.space, top, top_position, main_window_area.size);
     }
     if let Some(ref right) = workspace.right_window {
-        s.space.map_element(right.clone(), right_position, false);
+        handle_window(&mut s.space, right, right_position, main_window_area.size);
     }
     if let Some(ref bottom) = workspace.bottom_window {
-        s.space.map_element(bottom.clone(), bottom_position, false);
+        handle_window(&mut s.space, bottom, bottom_position, main_window_area.size);
     }
 }
 
@@ -312,14 +336,13 @@ fn handle_key_action(state: &mut Smallvil, action: Action) {
     match action {
         Action::SpawnCommand(command) => spawn_command(state, command),
         Action::FocusInDirection(direction) => {
-            let Option::Some(output_geometry) = state.focussed_output_geometry() else {
-                error!("Failed to get focussed output geometry");
+            let Option::Some(main_window_area) = state.main_window_area() else {
                 return;
             };
             match state.cur_workspace_state {
                 WorkspaceState::Grabbed(_pos) => {}
                 WorkspaceState::WindowFocussed(ref window) => {
-                    let pos = get_pos(output_geometry, window);
+                    let pos = get_pos(main_window_area, window);
                     info!("Animating 1");
                     state.cur_workspace_state = WorkspaceState::Animating(AnimationInfo {
                         start_time: SystemTime::now(),
@@ -329,7 +352,7 @@ fn handle_key_action(state: &mut Smallvil, action: Action) {
                     });
                 }
                 WorkspaceState::Animating(ref info) => {
-                    let (pos, velocity, _finished) = get_pos_and_velocity(info, output_geometry);
+                    let (pos, velocity, _finished) = get_pos_and_velocity(info, main_window_area);
                     state.cur_workspace_state = WorkspaceState::Animating(AnimationInfo {
                         start_time: SystemTime::now(),
                         start_pos: pos,
@@ -588,7 +611,7 @@ impl Smallvil {
             return;
         };
         let (left, top, right, bottom) =
-            get_left_top_right_bottom(self.focussed_output_geometry().unwrap());
+            get_left_top_right_bottom(self.main_window_area().unwrap());
         let left_distance = distance_from_points(pos, left);
         let top_distance = distance_from_points(pos, top);
         let right_distance = distance_from_points(pos, right);

@@ -48,7 +48,7 @@ use smithay::{
 use tracing::{info, warn};
 
 use crate::{
-    input::{get_pos, logical},
+    input::{get_pos, logical, MARGIN, MARGIN_POS},
     udev::UdevData,
 };
 
@@ -314,28 +314,20 @@ impl Smallvil {
         }
     }
 
-    /// Returns the currently focused monitor, falling back to the first mapped output.
-    pub fn focused_output(&self) -> Option<Output> {
-        match self.space.outputs().nth(self.cur_monitor) {
-            Option::Some(output) => Option::Some(output.clone()),
-            Option::None => {
-                warn!("Failed to get focussed monitor");
-                Option::None
-            }
-        }
-    }
-
-    pub fn focussed_output_geometry(&self) -> Option<smithay::utils::Rectangle<i32, Logical>> {
-        match self.focused_output() {
-            Option::Some(output) => match self.space.output_geometry(&output) {
-                Option::Some(geometry) => Option::Some(geometry),
-                Option::None => {
-                    warn!("Failed to get output geometry");
-                    Option::None
-                }
-            },
-            Option::None => Option::None,
-        }
+    /// Returns the area occupied by the main window
+    pub fn main_window_area(&self) -> Option<smithay::utils::Rectangle<i32, Logical>> {
+        let Option::Some(output) = self.space.outputs().nth(self.cur_monitor) else {
+            warn!("Failed to get focussed monitor");
+            return Option::None;
+        };
+        let Option::Some(geometry) = self.space.output_geometry(&output) else {
+            warn!("Failed to get output geometry");
+            return Option::None;
+        };
+        Option::Some(smithay::utils::Rectangle::<i32, Logical>::new(
+            geometry.loc + MARGIN_POS,
+            geometry.size - smithay::utils::Size::<i32, Logical>::new(MARGIN * 2, MARGIN * 2),
+        ))
     }
 
     pub fn post_repaint(
@@ -424,14 +416,14 @@ impl Smallvil {
     ///   transitions to `WindowFocussed`
     /// - `Grabbed`: the workspace follows the position of the grab
     pub fn get_pos(&mut self) -> Option<Point<f64, Logical>> {
-        let Option::Some(output_geometry) = self.focussed_output_geometry() else {
-            warn!("Failed to get output geometry");
+        let Option::Some(main_window_area) = self.main_window_area() else {
+            warn!("Failed to get main window area");
             return Option::None;
         };
         Option::Some(match &self.cur_workspace_state {
-            WorkspaceState::WindowFocussed(window) => get_pos(output_geometry, window),
+            WorkspaceState::WindowFocussed(window) => get_pos(main_window_area, window),
             WorkspaceState::Animating(info) => {
-                let (pos, _velocity, finished) = get_pos_and_velocity(info, output_geometry);
+                let (pos, _velocity, finished) = get_pos_and_velocity(info, main_window_area);
                 if finished {
                     info!("Finished animation");
                     self.cur_workspace_state = WorkspaceState::WindowFocussed(info.end_pos);
