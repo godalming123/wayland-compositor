@@ -23,7 +23,10 @@ use smithay::{
 };
 use tracing::{error, info, warn};
 
-use crate::state::{get_pos_and_velocity, AnimationInfo, Smallvil, WindowPosition, WorkspaceState};
+use crate::state::{
+    AnimationInfo, ProgressAndVelocity, Smallvil, WindowAreas, WindowPosition, WorkspaceAreas,
+    WorkspaceState,
+};
 
 /// Possible results of a keyboard action
 enum Action {
@@ -152,13 +155,13 @@ fn clamp_to_point(
 }
 */
 
-fn distance(a: Point<f64, Logical>, b: Point<f64, Logical>) -> f64 {
+pub fn distance(a: Point<f64, Logical>, b: Point<f64, Logical>) -> f64 {
     let delta_x = a.x - b.x;
     let delta_y = a.y - b.y;
     (delta_x * delta_x + delta_y * delta_y).sqrt()
 }
 
-fn between(
+pub const fn between(
     a: Point<f64, Logical>,
     b: Point<f64, Logical>,
     b_proportion: f64,
@@ -201,147 +204,118 @@ fn clamp_to_line(
     */
 }
 
-fn get_left(main_window_area: Rectangle<i32, Logical>) -> Point<f64, Logical> {
-    (main_window_area.loc + logical(-main_window_area.size.w - PADDING, 0)).to_f64()
+fn get_left(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    main_window_area.loc + logical(-main_window_area.size.w - f64::from(PADDING), 0.0)
 }
 
-fn get_top(main_window_area: Rectangle<i32, Logical>) -> Point<f64, Logical> {
-    (main_window_area.loc + logical(0, -main_window_area.size.h - PADDING)).to_f64()
+fn get_top(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    main_window_area.loc + logical(0.0, -main_window_area.size.h - f64::from(PADDING))
 }
 
-fn get_right(main_window_area: Rectangle<i32, Logical>) -> Point<f64, Logical> {
-    (main_window_area.loc + logical(main_window_area.size.w + PADDING, 0)).to_f64()
+fn get_right(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    main_window_area.loc + logical(main_window_area.size.w + f64::from(PADDING), 0.0)
 }
 
-fn get_bottom(main_window_area: Rectangle<i32, Logical>) -> Point<f64, Logical> {
-    (main_window_area.loc + logical(0, main_window_area.size.h + PADDING)).to_f64()
+fn get_bottom(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    main_window_area.loc + logical(0.0, main_window_area.size.h + f64::from(PADDING))
 }
 
-fn get_top_left(main_window_area: Rectangle<i32, Logical>) -> Point<f64, Logical> {
-    (main_window_area.loc
+fn get_top_left(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    main_window_area.loc
         + logical(
-            -main_window_area.size.w - PADDING,
-            -main_window_area.size.h - PADDING,
-        ))
-    .to_f64()
+            -main_window_area.size.w - f64::from(PADDING),
+            -main_window_area.size.h - f64::from(PADDING),
+        )
 }
 
-fn get_top_right(main_window_area: Rectangle<i32, Logical>) -> Point<f64, Logical> {
-    (main_window_area.loc
+fn get_top_right(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    main_window_area.loc
         + logical(
-            main_window_area.size.w + PADDING,
-            -main_window_area.size.h - PADDING,
-        ))
-    .to_f64()
+            main_window_area.size.w + f64::from(PADDING),
+            -main_window_area.size.h - f64::from(PADDING),
+        )
 }
 
-fn get_bottom_left(main_window_area: Rectangle<i32, Logical>) -> Point<f64, Logical> {
-    (main_window_area.loc
+fn get_bottom_left(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    main_window_area.loc
         + logical(
-            -main_window_area.size.w - PADDING,
-            main_window_area.size.h + PADDING,
-        ))
-    .to_f64()
+            -main_window_area.size.w - f64::from(PADDING),
+            main_window_area.size.h + f64::from(PADDING),
+        )
 }
 
-fn get_bottom_right(main_window_area: Rectangle<i32, Logical>) -> Point<f64, Logical> {
-    (main_window_area.loc
+fn get_bottom_right(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    main_window_area.loc
         + logical(
-            main_window_area.size.w + PADDING,
-            main_window_area.size.h + PADDING,
-        ))
-    .to_f64()
-}
-
-pub fn get_pos(
-    output_geometry: Rectangle<i32, Logical>,
-    direction: &WindowPosition,
-) -> Point<f64, Logical> {
-    match direction {
-        WindowPosition::TopLeft => get_top_left(output_geometry),
-        WindowPosition::Top => get_top(output_geometry),
-        WindowPosition::TopRight => get_top_right(output_geometry),
-        WindowPosition::Right => get_right(output_geometry),
-        WindowPosition::BottomRight => get_bottom_right(output_geometry),
-        WindowPosition::Bottom => get_bottom(output_geometry),
-        WindowPosition::BottomLeft => get_bottom_left(output_geometry),
-        WindowPosition::Left => get_left(output_geometry),
-    }
+            main_window_area.size.w + f64::from(PADDING),
+            main_window_area.size.h + f64::from(PADDING),
+        )
 }
 
 pub fn get_position(
-    main_window_loc: Point<f64, Logical>,
-    main_window_size: Size<i32, Logical>,
+    main_window_area: Rectangle<f64, Logical>,
     pos: Point<f64, Logical>,
 ) -> Point<f64, Logical> {
-    let delta = pos - main_window_loc;
+    let delta = pos - main_window_area.loc;
     logical(
-        delta.x / (f64::from(main_window_size.w) + f64::from(PADDING)),
-        delta.y / (f64::from(main_window_size.h) + f64::from(PADDING)),
+        delta.x / (main_window_area.size.w + f64::from(PADDING)),
+        delta.y / (main_window_area.size.h + f64::from(PADDING)),
     )
 }
 
-pub fn position_windows(s: &mut Smallvil, pos: Point<f64, Logical>) {
-    let main_window_area = match s.main_window_area() {
-        Option::Some(o) => o,
-        Option::None => {
-            warn!("Failed to get output geometry");
-            return;
-        }
-    };
-
-    let main_window_loc = main_window_area.loc.to_f64();
-    let p = get_position(main_window_loc, main_window_area.size, pos);
-
-    info!("p: {:?}, main_window_loc: {:?}", p, main_window_loc);
-
+pub fn position_windows(
+    s: &mut Smallvil,
+    window_areas: WorkspaceAreas<ProgressAndVelocity>,
+    main_window_area: Rectangle<f64, Logical>,
+    main_window_area_size: Size<i32, Logical>,
+) {
     let left_position = clamp_to_line(
-        main_window_loc,
+        main_window_area.loc,
         get_left(main_window_area),
-        distance(logical(-1.0, 0.0), p),
+        window_areas.left_window.progress,
     )
     .to_i32_round();
     let top_position = clamp_to_line(
-        main_window_loc,
+        main_window_area.loc,
         get_top(main_window_area),
-        distance(logical(0.0, -1.0), p),
+        window_areas.top_window.progress,
     )
     .to_i32_round();
     let right_position = clamp_to_line(
-        main_window_loc,
+        main_window_area.loc,
         get_right(main_window_area),
-        distance(logical(1.0, 0.0), p),
+        window_areas.right_window.progress,
     )
     .to_i32_round();
     let bottom_position = clamp_to_line(
-        main_window_loc,
+        main_window_area.loc,
         get_bottom(main_window_area),
-        distance(logical(0.0, 1.0), p),
+        window_areas.bottom_window.progress,
     )
     .to_i32_round();
 
     let top_left_position = clamp_to_line(
-        main_window_loc,
+        main_window_area.loc,
         get_top_left(main_window_area),
-        distance(logical(-1.0, -1.0), p),
+        window_areas.top_left_window.progress,
     )
     .to_i32_round();
     let top_right_position = clamp_to_line(
-        main_window_loc,
+        main_window_area.loc,
         get_top_right(main_window_area),
-        distance(logical(1.0, -1.0), p),
+        window_areas.top_right_window.progress,
     )
     .to_i32_round();
     let bottom_left_position = clamp_to_line(
-        main_window_loc,
+        main_window_area.loc,
         get_bottom_left(main_window_area),
-        distance(logical(-1.0, 1.0), p),
+        window_areas.bottom_left_window.progress,
     )
     .to_i32_round();
     let bottom_right_position = clamp_to_line(
-        main_window_loc,
+        main_window_area.loc,
         get_bottom_right(main_window_area),
-        distance(logical(1.0, 1.0), p),
+        window_areas.bottom_right_window.progress,
     )
     .to_i32_round();
 
@@ -369,23 +343,23 @@ pub fn position_windows(s: &mut Smallvil, pos: Point<f64, Logical>) {
 
     let workspace = &s.workspaces[s.cur_workspace];
     if let Some(ref left) = workspace.left_window {
-        handle_window(&mut s.space, left, left_position, main_window_area.size);
+        handle_window(&mut s.space, left, left_position, main_window_area_size);
     }
     if let Some(ref top) = workspace.top_window {
-        handle_window(&mut s.space, top, top_position, main_window_area.size);
+        handle_window(&mut s.space, top, top_position, main_window_area_size);
     }
     if let Some(ref right) = workspace.right_window {
-        handle_window(&mut s.space, right, right_position, main_window_area.size);
+        handle_window(&mut s.space, right, right_position, main_window_area_size);
     }
     if let Some(ref bottom) = workspace.bottom_window {
-        handle_window(&mut s.space, bottom, bottom_position, main_window_area.size);
+        handle_window(&mut s.space, bottom, bottom_position, main_window_area_size);
     }
     if let Some(ref top_left) = workspace.top_left_window {
         handle_window(
             &mut s.space,
             top_left,
             top_left_position,
-            main_window_area.size,
+            main_window_area_size,
         );
     }
     if let Some(ref top_right) = workspace.top_right_window {
@@ -393,7 +367,7 @@ pub fn position_windows(s: &mut Smallvil, pos: Point<f64, Logical>) {
             &mut s.space,
             top_right,
             top_right_position,
-            main_window_area.size,
+            main_window_area_size,
         );
     }
     if let Some(ref bottom_left) = workspace.bottom_left_window {
@@ -401,7 +375,7 @@ pub fn position_windows(s: &mut Smallvil, pos: Point<f64, Logical>) {
             &mut s.space,
             bottom_left,
             bottom_left_position,
-            main_window_area.size,
+            main_window_area_size,
         );
     }
     if let Some(ref bottom_right) = workspace.bottom_right_window {
@@ -409,7 +383,7 @@ pub fn position_windows(s: &mut Smallvil, pos: Point<f64, Logical>) {
             &mut s.space,
             bottom_right,
             bottom_right_position,
-            main_window_area.size,
+            main_window_area_size,
         );
     }
 }
@@ -478,33 +452,27 @@ fn handle_key_action(state: &mut Smallvil, action: Action) {
     info!("Handling key action");
     match action {
         Action::SpawnCommand(command) => spawn_command(state, command),
-        Action::FocusInDirection(direction) => {
-            let Option::Some(main_window_area) = state.main_window_area() else {
-                return;
-            };
-            match state.cur_workspace_state {
-                WorkspaceState::Grabbed(_pos) => {}
-                WorkspaceState::WindowFocussed(ref window) => {
-                    let pos = get_pos(main_window_area, window);
-                    info!("Animating 1");
-                    state.cur_workspace_state = WorkspaceState::Animating(AnimationInfo {
-                        start_time: SystemTime::now(),
-                        start_pos: pos,
-                        start_velocity: logical(0.0, 0.0),
-                        end_pos: direction,
-                    });
-                }
-                WorkspaceState::Animating(ref info) => {
-                    let (pos, velocity, _finished) = get_pos_and_velocity(info, main_window_area);
-                    state.cur_workspace_state = WorkspaceState::Animating(AnimationInfo {
-                        start_time: SystemTime::now(),
-                        start_pos: pos,
-                        start_velocity: velocity,
-                        end_pos: direction,
-                    })
-                }
+        Action::FocusInDirection(direction) => match state.cur_workspace_state {
+            WorkspaceState::Grabbed(_pos) => {}
+            WorkspaceState::Normal => {
+                let window_areas = WindowAreas::from_position(state.cur_workspace_focussed_window);
+                info!("Animating 1");
+                state.cur_workspace_state = WorkspaceState::Animating(AnimationInfo {
+                    start_time: SystemTime::now(),
+                    start_info: window_areas,
+                });
+                state.cur_workspace_focussed_window = direction
             }
-        }
+            WorkspaceState::Animating(ref info) => {
+                let (window_areas, _finished) =
+                    WindowAreas::from_animation(info, state.cur_workspace_focussed_window);
+                state.cur_workspace_state = WorkspaceState::Animating(AnimationInfo {
+                    start_time: SystemTime::now(),
+                    start_info: window_areas,
+                });
+                state.cur_workspace_focussed_window = direction;
+            }
+        },
         Action::CloseFocussedWindow => close_focussed_window(state),
         Action::Quit => {
             info!("Quitting");
@@ -731,10 +699,7 @@ impl Smallvil {
 
     fn on_gesture_swipe_begin<I: InputBackend>(&mut self, _event: I::GestureSwipeBeginEvent) {
         info!("Gesture swipe begin event");
-        let Option::Some(pos) = self.get_pos() else {
-            return;
-        };
-        self.cur_workspace_state = WorkspaceState::Grabbed(pos);
+        self.cur_workspace_state = WorkspaceState::Grabbed(logical(0.0, 0.0));
     }
 
     fn on_gesture_swipe_update<I: InputBackend>(&mut self, event: I::GestureSwipeUpdateEvent) {
@@ -750,15 +715,17 @@ impl Smallvil {
     }
 
     fn on_gesture_swipe_end<I: InputBackend>(&mut self, _event: I::GestureSwipeEndEvent) {
-        let WorkspaceState::Grabbed(pos) = self.cur_workspace_state else {
+        info!("Gesture swipe end event");
+        let WorkspaceState::Grabbed(grab_delta) = self.cur_workspace_state else {
             error!("Expected state to be grabbed");
             return;
         };
-        let Option::Some(area) = self.main_window_area() else {
+        let Option::Some((area, _)) = self.main_window_area() else {
             return;
         };
-        let pos = get_position(area.loc.to_f64(), area.size, pos);
-        let end_pos = if pos.y < -0.5 {
+        let pos = get_position(area, grab_delta);
+        let start_info = WindowAreas::from_gesture(self.cur_workspace_focussed_window, pos);
+        self.cur_workspace_focussed_window = if pos.y < -0.5 {
             if pos.x < -0.5 {
                 WindowPosition::TopLeft
             } else if pos.x < 0.5 {
@@ -784,10 +751,7 @@ impl Smallvil {
         info!("Animating 3");
         self.cur_workspace_state = WorkspaceState::Animating(AnimationInfo {
             start_time: SystemTime::now(),
-            start_pos: pos,
-            start_velocity: logical(0.0, 0.0), // TODO: Put in proper velocity
-            end_pos: end_pos,
+            start_info: start_info,
         });
-        info!("Gesture swipe end event")
     }
 }

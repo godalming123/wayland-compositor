@@ -1,7 +1,7 @@
 use std::{
     ffi::OsString,
     sync::{atomic::AtomicBool, Arc},
-    time::{Duration, SystemTime},
+    time::SystemTime,
 };
 
 use smithay::{
@@ -33,7 +33,7 @@ use smithay::{
             Display, DisplayHandle,
         },
     },
-    utils::{Clock, Coordinate, Logical, Monotonic, Point, Rectangle},
+    utils::{Clock, Coordinate, Logical, Monotonic, Point},
     wayland::{
         compositor::{CompositorClientState, CompositorState},
         dmabuf::DmabufFeedback,
@@ -48,21 +48,170 @@ use smithay::{
 use tracing::{info, warn};
 
 use crate::{
-    input::{get_pos, logical, MARGIN, MARGIN_POS},
+    input::{distance, get_position, logical, MARGIN, MARGIN_POS},
     udev::UdevData,
 };
 
-#[derive(Clone)]
-pub struct SmallvilWorkspace {
-    pub left_window: Option<smithay::desktop::Window>,
-    pub top_window: Option<smithay::desktop::Window>,
-    pub right_window: Option<smithay::desktop::Window>,
-    pub bottom_window: Option<smithay::desktop::Window>,
+pub struct WorkspaceAreas<T> {
+    pub top_left_window: T,
+    pub top_window: T,
+    pub top_right_window: T,
+    pub right_window: T,
+    pub bottom_right_window: T,
+    pub bottom_window: T,
+    pub bottom_left_window: T,
+    pub left_window: T,
+}
 
-    pub top_left_window: Option<smithay::desktop::Window>,
-    pub top_right_window: Option<smithay::desktop::Window>,
-    pub bottom_left_window: Option<smithay::desktop::Window>,
-    pub bottom_right_window: Option<smithay::desktop::Window>,
+impl<A> WorkspaceAreas<A> {
+    pub fn replace(&mut self, position: WindowPosition, new_value: A) {
+        match position {
+            WindowPosition::TopLeft => self.top_left_window = new_value,
+            WindowPosition::Top => self.top_window = new_value,
+            WindowPosition::TopRight => self.top_right_window = new_value,
+            WindowPosition::Right => self.right_window = new_value,
+            WindowPosition::BottomRight => self.bottom_right_window = new_value,
+            WindowPosition::Bottom => self.bottom_window = new_value,
+            WindowPosition::BottomLeft => self.bottom_left_window = new_value,
+            WindowPosition::Left => self.left_window = new_value,
+        }
+    }
+    pub fn merge_with<'l, B, C, F: Fn(&'l A, B) -> C>(
+        &'l self,
+        other: WorkspaceAreas<B>,
+        func: F,
+    ) -> WorkspaceAreas<C> {
+        WorkspaceAreas::<C> {
+            top_left_window: func(&self.top_left_window, other.top_left_window),
+            top_window: func(&self.top_window, other.top_window),
+            top_right_window: func(&self.top_right_window, other.top_right_window),
+            right_window: func(&self.right_window, other.right_window),
+            bottom_right_window: func(&self.bottom_right_window, other.bottom_right_window),
+            bottom_window: func(&self.bottom_window, other.bottom_window),
+            bottom_left_window: func(&self.bottom_left_window, other.bottom_left_window),
+            left_window: func(&self.left_window, other.left_window),
+        }
+    }
+}
+
+pub type SmallvilWorkspace = WorkspaceAreas<Option<smithay::desktop::Window>>;
+pub type WindowAreas = WorkspaceAreas<ProgressAndVelocity>;
+
+impl WindowAreas {
+    pub fn max_progress(&self) -> f64 {
+        self.top_left_window
+            .progress
+            .max(self.top_window.progress)
+            .max(self.top_right_window.progress)
+            .max(self.right_window.progress)
+            .max(self.bottom_right_window.progress)
+            .max(self.bottom_window.progress)
+            .max(self.bottom_left_window.progress)
+            .max(self.left_window.progress)
+    }
+
+    pub fn from_position(position: WindowPosition) -> Self {
+        let default_position = ProgressAndVelocity {
+            progress: 1.0,
+            velocity: 0.0,
+        };
+        let mut out = Self {
+            top_left_window: default_position,
+            top_window: default_position,
+            top_right_window: default_position,
+            right_window: default_position,
+            bottom_right_window: default_position,
+            bottom_window: default_position,
+            bottom_left_window: default_position,
+            left_window: default_position,
+        };
+        out.replace(
+            position,
+            ProgressAndVelocity {
+                progress: 0.0,
+                velocity: 1.0,
+            },
+        );
+        out
+    }
+
+    pub fn from_gesture(
+        grab_start: WindowPosition,
+        p: Point<f64, Logical>, // x and y in range -1.0 to 1.0 inclusive
+    ) -> Self {
+        // TODO: Specify velocity
+        let mut out = WorkspaceAreas::<ProgressAndVelocity> {
+            top_left_window: ProgressAndVelocity {
+                progress: distance(logical(-1.0, -1.0), p),
+                velocity: 0.0,
+            },
+            top_window: ProgressAndVelocity {
+                progress: distance(logical(0.0, -1.0), p),
+                velocity: 0.0,
+            },
+            top_right_window: ProgressAndVelocity {
+                progress: distance(logical(1.0, -1.0), p),
+                velocity: 0.0,
+            },
+            right_window: ProgressAndVelocity {
+                progress: distance(logical(1.0, 0.0), p),
+                velocity: 0.0,
+            },
+            bottom_right_window: ProgressAndVelocity {
+                progress: distance(logical(1.0, 1.0), p),
+                velocity: 0.0,
+            },
+            bottom_window: ProgressAndVelocity {
+                progress: distance(logical(0.0, 1.0), p),
+                velocity: 0.0,
+            },
+            bottom_left_window: ProgressAndVelocity {
+                progress: distance(logical(-1.0, 1.0), p),
+                velocity: 0.0,
+            },
+            left_window: ProgressAndVelocity {
+                progress: distance(logical(-1.0, 0.0), p),
+                velocity: 0.0,
+            },
+        };
+        out.replace(
+            grab_start,
+            ProgressAndVelocity {
+                progress: 0.0,
+                velocity: 0.0,
+            },
+        );
+        let max_progress = out.max_progress();
+        out.replace(
+            grab_start,
+            ProgressAndVelocity {
+                progress: 1.0 - max_progress,
+                velocity: 0.0,
+            },
+        );
+        out
+    }
+
+    // TODO: Return the actual velocity
+    // TODO: Take info.start_velocity into account
+    // TODO: Ease animation in and out rather than having a constant velocity
+    pub fn from_animation(info: &AnimationInfo, end_pos: WindowPosition) -> (Self, bool) {
+        let now = SystemTime::now();
+        let elapsed = now.duration_since(info.start_time).unwrap();
+        let progress = if elapsed.as_secs() > 1 {
+            1.0
+        } else {
+            elapsed.subsec_millis().to_f64() / ANIMATION_MS
+        };
+        let c = |start: &ProgressAndVelocity, end: ProgressAndVelocity| ProgressAndVelocity {
+            progress: start.progress * (1.0 - progress).max(0.0) + end.progress * progress,
+            velocity: 10.0,
+        };
+        (
+            info.start_info.merge_with(Self::from_position(end_pos), c),
+            progress >= 1.0,
+        )
+    }
 }
 
 pub const EMPTY_WORKSPACE: SmallvilWorkspace = SmallvilWorkspace {
@@ -103,49 +252,26 @@ pub struct SurfaceDmabufFeedback {
 
 pub struct AnimationInfo {
     pub start_time: SystemTime,
-    pub start_pos: Point<f64, Logical>,
-    pub start_velocity: Point<f64, Logical>,
-    pub end_pos: WindowPosition,
+    pub start_info: WorkspaceAreas<ProgressAndVelocity>,
 }
 
 const ANIMATION_MS: f64 = 300.0;
 
-fn get_progress(d: Duration) -> f64 {
-    if d.as_secs() > 1 {
-        1.0
-    } else {
-        d.subsec_millis().to_f64() / ANIMATION_MS
-    }
-}
-
-// TODO: Return the actual velocity
-// TODO: Take info.start_velocity into account
-// TODO: Ease animation in and out rather than having a constant velocity
-pub fn get_pos_and_velocity(
-    info: &AnimationInfo,
-    output_geoemetry: Rectangle<i32, Logical>,
-) -> (Point<f64, Logical>, Point<f64, Logical>, bool) {
-    let now = SystemTime::now();
-    let progress = get_progress(now.duration_since(info.start_time).unwrap());
-    let end_pos = get_pos(output_geoemetry, &info.end_pos);
-    (
-        logical(
-            info.start_pos.x * (1.0 - progress) + end_pos.x * progress,
-            info.start_pos.y * (1.0 - progress) + end_pos.y * progress,
-        ),
-        logical(10.0, 10.0),
-        progress >= 1.0,
-    )
+#[derive(Clone, Copy)]
+pub struct ProgressAndVelocity {
+    pub progress: f64, // 0.0 - 1.0
+    velocity: f64,     // TODO
 }
 
 pub enum WorkspaceState {
-    WindowFocussed(WindowPosition),
+    Normal,
     Animating(AnimationInfo),
     Grabbed(Point<f64, Logical>),
 }
 
 pub struct Smallvil {
     pub cur_workspace: usize,
+    pub cur_workspace_focussed_window: WindowPosition,
     pub cur_workspace_state: WorkspaceState,
     pub cur_monitor: usize,
     pub workspaces: Vec<SmallvilWorkspace>,
@@ -230,7 +356,8 @@ impl Smallvil {
 
         Self {
             cur_workspace: 0,
-            cur_workspace_state: WorkspaceState::WindowFocussed(WindowPosition::Left),
+            cur_workspace_focussed_window: WindowPosition::TopLeft,
+            cur_workspace_state: WorkspaceState::Normal,
             cur_monitor: 0,
             workspaces: vec![EMPTY_WORKSPACE],
 
@@ -329,7 +456,12 @@ impl Smallvil {
     }
 
     /// Returns the area occupied by the main window
-    pub fn main_window_area(&self) -> Option<smithay::utils::Rectangle<i32, Logical>> {
+    pub fn main_window_area(
+        &self,
+    ) -> Option<(
+        smithay::utils::Rectangle<f64, Logical>,
+        smithay::utils::Size<i32, Logical>,
+    )> {
         let Option::Some(output) = self.space.outputs().nth(self.cur_monitor) else {
             warn!("Failed to get focussed monitor");
             return Option::None;
@@ -338,9 +470,14 @@ impl Smallvil {
             warn!("Failed to get output geometry");
             return Option::None;
         };
-        Option::Some(smithay::utils::Rectangle::<i32, Logical>::new(
-            geometry.loc + MARGIN_POS,
-            geometry.size - smithay::utils::Size::<i32, Logical>::new(MARGIN * 2, MARGIN * 2),
+        let size =
+            geometry.size - smithay::utils::Size::<i32, Logical>::new(MARGIN * 2, MARGIN * 2);
+        Option::Some((
+            smithay::utils::Rectangle::<f64, Logical>::new(
+                (geometry.loc + MARGIN_POS).to_f64(),
+                size.to_f64(),
+            ),
+            size,
         ))
     }
 
@@ -429,31 +566,38 @@ impl Smallvil {
     ///   [`get_pos_and_velocity`]); once the animation finished the state
     ///   transitions to `WindowFocussed`
     /// - `Grabbed`: the workspace follows the position of the grab
-    pub fn get_pos(&mut self) -> Option<Point<f64, Logical>> {
-        let Option::Some(main_window_area) = self.main_window_area() else {
-            warn!("Failed to get main window area");
-            return Option::None;
-        };
-        Option::Some(match &self.cur_workspace_state {
-            WorkspaceState::WindowFocussed(window) => get_pos(main_window_area, window),
-            WorkspaceState::Animating(info) => {
-                let (pos, _velocity, finished) = get_pos_and_velocity(info, main_window_area);
-                if finished {
-                    info!("Finished animation");
-                    self.cur_workspace_state = WorkspaceState::WindowFocussed(info.end_pos);
-                }
-                pos
-            }
-            WorkspaceState::Grabbed(pos) => *pos,
-        })
-    }
-
     /// Should be called on every render.
     pub fn update_workspace_position(&mut self) {
-        match self.get_pos() {
-            Option::Some(pos) => crate::input::position_windows(self, pos),
-            Option::None => {}
+        let Option::Some((main_window_area, main_window_area_size)) = self.main_window_area()
+        else {
+            warn!("Failed to get output geometry");
+            return;
         };
+
+        let window_areas = match &self.cur_workspace_state {
+            WorkspaceState::Normal => {
+                info!("Getting window areas from position");
+                WindowAreas::from_position(self.cur_workspace_focussed_window)
+            }
+            WorkspaceState::Animating(info) => {
+                info!("Getting window areas from animation");
+                let (window_areas, finished) =
+                    WindowAreas::from_animation(info, self.cur_workspace_focussed_window);
+                if finished {
+                    info!("Finished animation");
+                    self.cur_workspace_state = WorkspaceState::Normal;
+                }
+                window_areas
+            }
+            WorkspaceState::Grabbed(pos) => {
+                info!("Getting window areas from grabbed");
+                WindowAreas::from_gesture(
+                    self.cur_workspace_focussed_window,
+                    get_position(main_window_area, *pos),
+                )
+            }
+        };
+        crate::input::position_windows(self, window_areas, main_window_area, main_window_area_size);
     }
 }
 
