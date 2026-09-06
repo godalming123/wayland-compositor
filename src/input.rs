@@ -340,8 +340,11 @@ pub fn position_windows(
         pos: Point<i32, Logical>,
         size: Size<i32, Logical>,
     ) {
-        space.map_element(window.clone(), pos, false);
-        if window.geometry().size != size {
+        let geometry = window.geometry();
+        if geometry.loc != pos {
+            space.map_element(window.clone(), pos, false);
+        };
+        if geometry.size != size {
             let xdg = window.toplevel().unwrap();
             xdg.with_pending_state(|state| {
                 state.states.set(xdg_toplevel::State::Resizing);

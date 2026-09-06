@@ -7,6 +7,7 @@
 
 # Improve the implementation of the mental model
 
+- [ ] I think it would be better if there are 4 keybindings/trackpad gestures to switch windows within a workspace and you just press the keybinding twice to access some of the windows
 - [ ] Maybe windows should continue being added to the workspace forever, and the gesture just gradually becomes more specific
 - [ ] Maybe the there should be 2 windows per edge rather than 1 window per edge and 1 window per corner
 - [ ] Improve navigating between windows
