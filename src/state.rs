@@ -607,11 +607,11 @@ impl Smallvil {
 
         let window_areas = match &self.cur_workspace_state {
             WorkspaceState::Normal => {
-                info!("Getting window areas from position");
+                // info!("Getting window areas from position");
                 WindowAreas::from_position(self.cur_workspace_focussed_window)
             }
             WorkspaceState::Animating(info) => {
-                info!("Getting window areas from animation");
+                // info!("Getting window areas from animation");
                 let (window_areas, finished) =
                     WindowAreas::from_animation(info, self.cur_workspace_focussed_window);
                 if finished {
@@ -621,7 +621,7 @@ impl Smallvil {
                 window_areas
             }
             WorkspaceState::Grabbed(pos) => {
-                info!("Getting window areas from grabbed");
+                // info!("Getting window areas from grabbed");
                 WindowAreas::from_gesture(
                     self.cur_workspace_focussed_window,
                     get_position(main_window_area, *pos),

@@ -31,10 +31,10 @@ use crate::state::{
 /// Possible results of a keyboard action
 enum Action {
     FocusInDirection(WindowPosition),
-    SpawnCommand(&'static str), // Spawn a command
-    CloseFocussedWindow,        // Close the currently focussed window
-    Quit,                       // Quit the compositor
-    VtSwitch(i32),              // Trigger a vt-switch
+    SpawnCommand(&'static str, Vec<&'static str>), // Spawn a command
+    CloseFocussedWindow,                           // Close the currently focussed window
+    Quit,                                          // Quit the compositor
+    VtSwitch(i32),                                 // Trigger a vt-switch
 }
 
 fn parse_released_key(
@@ -64,9 +64,17 @@ fn parse_pressed_key(
     if modifiers.alt || modifiers.logo {
         match sym {
             Keysym::Tab => FilterResult::Intercept(Action::Quit),
-            Keysym::f => FilterResult::Intercept(Action::SpawnCommand("firefox")),
-            Keysym::g => FilterResult::Intercept(Action::SpawnCommand("ghostty")),
-            Keysym::x => FilterResult::Intercept(Action::SpawnCommand("systemctl suspend")),
+            Keysym::f => FilterResult::Intercept(Action::SpawnCommand("firefox", vec![])),
+            Keysym::g => FilterResult::Intercept(Action::SpawnCommand("ghostty", vec![])),
+            Keysym::b => {
+                FilterResult::Intercept(Action::SpawnCommand("alacritty", vec!["-e", "btop"]))
+            }
+            Keysym::a => FilterResult::Intercept(Action::SpawnCommand("alacritty", vec![])),
+            Keysym::F => FilterResult::Intercept(Action::SpawnCommand("foot", vec![])),
+            Keysym::w => FilterResult::Intercept(Action::SpawnCommand("weston-terminal", vec![])),
+            Keysym::x => {
+                FilterResult::Intercept(Action::SpawnCommand("systemctl", vec!["suspend"]))
+            }
             Keysym::y => FilterResult::Intercept(Action::FocusInDirection(WindowPosition::TopLeft)),
             Keysym::u => FilterResult::Intercept(Action::FocusInDirection(WindowPosition::Top)),
             Keysym::i => {
@@ -185,10 +193,10 @@ fn clamp_to_line(
     let restricted_portion_along = rubber_band_delta(portion_along, 1.0);
     */
     let restricted_portion_along = portion_along.max(0.0).min(1.0);
-    info!(
-        "Portion along: {}, restricted portion along: {}",
-        portion_along, restricted_portion_along
-    );
+    // info!(
+    //     "Portion along: {}, restricted portion along: {}",
+    //     portion_along, restricted_portion_along
+    // );
     between(start, end, restricted_portion_along)
     /*
     let (left, right, top, bottom) = get_left_right_top_bottom_for_points(start, end);
@@ -390,9 +398,10 @@ pub fn position_windows(
     }
 }
 
-fn spawn_command(state: &mut Smallvil, command: &str) {
+fn spawn_command(state: &mut Smallvil, command: &str, args: Vec<&str>) {
     info!("Spawning command {}", command);
     let res = std::process::Command::new(command)
+        .args(args)
         .env("WAYLAND_DISPLAY", state.socket_name.clone()) // TODO: Do not use clone if possible
         .stdout(std::process::Stdio::null())
         .stdin(std::process::Stdio::null())
@@ -453,7 +462,7 @@ fn close_focussed_window(state: &mut Smallvil) {
 fn handle_key_action(state: &mut Smallvil, action: Action) {
     info!("Handling key action");
     match action {
-        Action::SpawnCommand(command) => spawn_command(state, command),
+        Action::SpawnCommand(command, args) => spawn_command(state, command, args),
         Action::FocusInDirection(direction) => match state.cur_workspace_state {
             WorkspaceState::Grabbed(_pos) => {}
             WorkspaceState::Normal => {
