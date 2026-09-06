@@ -178,11 +178,13 @@ fn clamp_to_line(
     end: Point<f64, Logical>,
     portion_along: f64,
 ) -> Point<f64, Logical> {
-    assert!(portion_along >= 0.0);
+    if portion_along < 0.0 {
+        error!("portion along: {}", portion_along);
+    };
     /*
     let restricted_portion_along = rubber_band_delta(portion_along, 1.0);
     */
-    let restricted_portion_along = portion_along.min(1.0);
+    let restricted_portion_along = portion_along.max(0.0).min(1.0);
     info!(
         "Portion along: {}, restricted portion along: {}",
         portion_along, restricted_portion_along
@@ -725,29 +727,7 @@ impl Smallvil {
         };
         let pos = get_position(area, grab_delta);
         let start_info = WindowAreas::from_gesture(self.cur_workspace_focussed_window, pos);
-        self.cur_workspace_focussed_window = if pos.y < -0.5 {
-            if pos.x < -0.5 {
-                WindowPosition::TopLeft
-            } else if pos.x < 0.5 {
-                WindowPosition::Top
-            } else {
-                WindowPosition::TopRight
-            }
-        } else if pos.y < 0.5 {
-            if pos.x < 0.0 {
-                WindowPosition::Left
-            } else {
-                WindowPosition::Right
-            }
-        } else {
-            if pos.x < -0.5 {
-                WindowPosition::BottomLeft
-            } else if pos.x < 0.5 {
-                WindowPosition::Bottom
-            } else {
-                WindowPosition::BottomRight
-            }
-        };
+        (_, self.cur_workspace_focussed_window) = start_info.min_progress();
         info!("Animating 3");
         self.cur_workspace_state = WorkspaceState::Animating(AnimationInfo {
             start_time: SystemTime::now(),

@@ -97,17 +97,47 @@ impl<A> WorkspaceAreas<A> {
 pub type SmallvilWorkspace = WorkspaceAreas<Option<smithay::desktop::Window>>;
 pub type WindowAreas = WorkspaceAreas<ProgressAndVelocity>;
 
+struct Wrapped<T> {
+    inner: T,
+}
+
+impl<A> Wrapped<A> {
+    pub fn pipe<F, B>(self, func: F) -> Wrapped<B>
+    where
+        F: FnOnce(A) -> B,
+    {
+        Wrapped::<B> {
+            inner: func(self.inner),
+        }
+    }
+
+    pub fn unwrap(self) -> A {
+        self.inner
+    }
+}
+
+impl<T> Wrapped<(f64, T)> {
+    fn min(self, b_num: f64, b_info: T) -> Self {
+        self.pipe(|a| if a.0 < b_num { a } else { (b_num, b_info) })
+    }
+}
+
 impl WindowAreas {
-    pub fn max_progress(&self) -> f64 {
-        self.top_left_window
-            .progress
-            .max(self.top_window.progress)
-            .max(self.top_right_window.progress)
-            .max(self.right_window.progress)
-            .max(self.bottom_right_window.progress)
-            .max(self.bottom_window.progress)
-            .max(self.bottom_left_window.progress)
-            .max(self.left_window.progress)
+    pub fn min_progress(&self) -> (f64, WindowPosition) {
+        Wrapped {
+            inner: (self.top_left_window.progress, WindowPosition::TopLeft),
+        }
+        .min(self.top_window.progress, WindowPosition::Top)
+        .min(self.top_right_window.progress, WindowPosition::TopRight)
+        .min(self.right_window.progress, WindowPosition::Right)
+        .min(
+            self.bottom_right_window.progress,
+            WindowPosition::BottomRight,
+        )
+        .min(self.bottom_window.progress, WindowPosition::Bottom)
+        .min(self.bottom_left_window.progress, WindowPosition::BottomLeft)
+        .min(self.left_window.progress, WindowPosition::Left)
+        .unwrap()
     }
 
     pub fn from_position(position: WindowPosition) -> Self {
@@ -139,10 +169,11 @@ impl WindowAreas {
         grab_start: WindowPosition,
         p: Point<f64, Logical>, // x and y in range -1.0 to 1.0 inclusive
     ) -> Self {
+        let n = f64::sqrt(0.5);
         // TODO: Specify velocity
         let mut out = WorkspaceAreas::<ProgressAndVelocity> {
             top_left_window: ProgressAndVelocity {
-                progress: distance(logical(-1.0, -1.0), p),
+                progress: distance(logical(-n, -n), p),
                 velocity: 0.0,
             },
             top_window: ProgressAndVelocity {
@@ -150,7 +181,7 @@ impl WindowAreas {
                 velocity: 0.0,
             },
             top_right_window: ProgressAndVelocity {
-                progress: distance(logical(1.0, -1.0), p),
+                progress: distance(logical(n, -n), p),
                 velocity: 0.0,
             },
             right_window: ProgressAndVelocity {
@@ -158,7 +189,7 @@ impl WindowAreas {
                 velocity: 0.0,
             },
             bottom_right_window: ProgressAndVelocity {
-                progress: distance(logical(1.0, 1.0), p),
+                progress: distance(logical(n, n), p),
                 velocity: 0.0,
             },
             bottom_window: ProgressAndVelocity {
@@ -166,7 +197,7 @@ impl WindowAreas {
                 velocity: 0.0,
             },
             bottom_left_window: ProgressAndVelocity {
-                progress: distance(logical(-1.0, 1.0), p),
+                progress: distance(logical(-n, n), p),
                 velocity: 0.0,
             },
             left_window: ProgressAndVelocity {
@@ -177,15 +208,15 @@ impl WindowAreas {
         out.replace(
             grab_start,
             ProgressAndVelocity {
-                progress: 0.0,
+                progress: 1.0,
                 velocity: 0.0,
             },
         );
-        let max_progress = out.max_progress();
+        let (min_progress, _) = out.min_progress();
         out.replace(
             grab_start,
             ProgressAndVelocity {
-                progress: 1.0 - max_progress,
+                progress: 1.0 - min_progress,
                 velocity: 0.0,
             },
         );
