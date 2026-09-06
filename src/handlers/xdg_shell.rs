@@ -23,18 +23,27 @@ impl XdgShellHandler for Smallvil {
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
         let window = Window::new_wayland_window(surface);
-        if self.workspaces[self.cur_workspace].left_window.is_none() {
-            self.workspaces[self.cur_workspace].left_window = Some(window.clone());
-        } else if self.workspaces[self.cur_workspace].top_window.is_none() {
-            self.workspaces[self.cur_workspace].top_window = Some(window.clone());
-        } else if self.workspaces[self.cur_workspace].right_window.is_none() {
-            self.workspaces[self.cur_workspace].right_window = Some(window.clone());
-        } else if self.workspaces[self.cur_workspace].bottom_window.is_none() {
-            self.workspaces[self.cur_workspace].bottom_window = Some(window.clone());
+        let workspace = &mut self.workspaces[self.cur_workspace];
+        if workspace.top_left_window.is_none() {
+            workspace.top_left_window = Some(window.clone());
+        } else if workspace.top_window.is_none() {
+            workspace.top_window = Some(window.clone());
+        } else if workspace.top_right_window.is_none() {
+            workspace.top_right_window = Some(window.clone());
+        } else if workspace.right_window.is_none() {
+            workspace.right_window = Some(window.clone());
+        } else if workspace.bottom_right_window.is_none() {
+            workspace.bottom_right_window = Some(window.clone());
+        } else if workspace.bottom_window.is_none() {
+            workspace.bottom_window = Some(window.clone());
+        } else if workspace.bottom_left_window.is_none() {
+            workspace.bottom_left_window = Some(window.clone());
+        } else if workspace.left_window.is_none() {
+            workspace.left_window = Some(window.clone());
         } else {
             self.cur_workspace += 1;
             self.workspaces.insert(self.cur_workspace, EMPTY_WORKSPACE);
-            self.workspaces[self.cur_workspace].left_window = Some(window.clone());
+            self.workspaces[self.cur_workspace].top_left_window = Some(window.clone());
         }
         self.space.map_element(window, (0, 0), false);
     }

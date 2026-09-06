@@ -58,6 +58,11 @@ pub struct SmallvilWorkspace {
     pub top_window: Option<smithay::desktop::Window>,
     pub right_window: Option<smithay::desktop::Window>,
     pub bottom_window: Option<smithay::desktop::Window>,
+
+    pub top_left_window: Option<smithay::desktop::Window>,
+    pub top_right_window: Option<smithay::desktop::Window>,
+    pub bottom_left_window: Option<smithay::desktop::Window>,
+    pub bottom_right_window: Option<smithay::desktop::Window>,
 }
 
 pub const EMPTY_WORKSPACE: SmallvilWorkspace = SmallvilWorkspace {
@@ -65,14 +70,23 @@ pub const EMPTY_WORKSPACE: SmallvilWorkspace = SmallvilWorkspace {
     top_window: Option::None,
     right_window: Option::None,
     bottom_window: Option::None,
+
+    top_left_window: Option::None,
+    top_right_window: Option::None,
+    bottom_left_window: Option::None,
+    bottom_right_window: Option::None,
 };
 
 #[derive(Clone, Copy)]
 pub enum WindowPosition {
-    Left,
+    TopLeft,
     Top,
+    TopRight,
     Right,
+    BottomRight,
     Bottom,
+    BottomLeft,
+    Left,
 }
 
 #[derive(Debug)]

@@ -64,11 +64,22 @@ fn parse_pressed_key(
             Keysym::f => FilterResult::Intercept(Action::SpawnCommand("firefox")),
             Keysym::g => FilterResult::Intercept(Action::SpawnCommand("ghostty")),
             Keysym::x => FilterResult::Intercept(Action::SpawnCommand("systemctl suspend")),
+            Keysym::y => FilterResult::Intercept(Action::FocusInDirection(WindowPosition::TopLeft)),
+            Keysym::u => FilterResult::Intercept(Action::FocusInDirection(WindowPosition::Top)),
+            Keysym::i => {
+                FilterResult::Intercept(Action::FocusInDirection(WindowPosition::TopRight))
+            }
+            Keysym::k => FilterResult::Intercept(Action::FocusInDirection(WindowPosition::Right)),
+            Keysym::comma => {
+                FilterResult::Intercept(Action::FocusInDirection(WindowPosition::BottomRight))
+            }
+            Keysym::m | Keysym::j => {
+                FilterResult::Intercept(Action::FocusInDirection(WindowPosition::Bottom))
+            }
+            Keysym::n => {
+                FilterResult::Intercept(Action::FocusInDirection(WindowPosition::BottomLeft))
+            }
             Keysym::h => FilterResult::Intercept(Action::FocusInDirection(WindowPosition::Left)),
-            Keysym::j => FilterResult::Intercept(Action::FocusInDirection(WindowPosition::Bottom)),
-            Keysym::k => FilterResult::Intercept(Action::FocusInDirection(WindowPosition::Top)),
-            Keysym::l => FilterResult::Intercept(Action::FocusInDirection(WindowPosition::Right)),
-            Keysym::d => FilterResult::Intercept(Action::CloseFocussedWindow),
             _ => FilterResult::Forward,
         }
     } else {
@@ -190,34 +201,84 @@ fn clamp_to_line(
     */
 }
 
-fn get_left_top_right_bottom(
-    main_window_area: Rectangle<i32, Logical>,
-) -> (
-    Point<f64, Logical>,
-    Point<f64, Logical>,
-    Point<f64, Logical>,
-    Point<f64, Logical>,
-) {
-    let left_pos = (main_window_area.loc + logical(-main_window_area.size.w - PADDING, 0)).to_f64();
-    let top_pos = (main_window_area.loc + logical(0, -main_window_area.size.h - PADDING)).to_f64();
-    let right_pos = (main_window_area.loc + logical(main_window_area.size.w + PADDING, 0)).to_f64();
-    let bottom_pos =
-        (main_window_area.loc + logical(0, main_window_area.size.h + PADDING)).to_f64();
+fn get_left(main_window_area: Rectangle<i32, Logical>) -> Point<f64, Logical> {
+    (main_window_area.loc + logical(-main_window_area.size.w - PADDING, 0)).to_f64()
+}
 
-    (left_pos, top_pos, right_pos, bottom_pos)
+fn get_top(main_window_area: Rectangle<i32, Logical>) -> Point<f64, Logical> {
+    (main_window_area.loc + logical(0, -main_window_area.size.h - PADDING)).to_f64()
+}
+
+fn get_right(main_window_area: Rectangle<i32, Logical>) -> Point<f64, Logical> {
+    (main_window_area.loc + logical(main_window_area.size.w + PADDING, 0)).to_f64()
+}
+
+fn get_bottom(main_window_area: Rectangle<i32, Logical>) -> Point<f64, Logical> {
+    (main_window_area.loc + logical(0, main_window_area.size.h + PADDING)).to_f64()
+}
+
+fn get_top_left(main_window_area: Rectangle<i32, Logical>) -> Point<f64, Logical> {
+    (main_window_area.loc
+        + logical(
+            -main_window_area.size.w - PADDING,
+            -main_window_area.size.h - PADDING,
+        ))
+    .to_f64()
+}
+
+fn get_top_right(main_window_area: Rectangle<i32, Logical>) -> Point<f64, Logical> {
+    (main_window_area.loc
+        + logical(
+            main_window_area.size.w + PADDING,
+            -main_window_area.size.h - PADDING,
+        ))
+    .to_f64()
+}
+
+fn get_bottom_left(main_window_area: Rectangle<i32, Logical>) -> Point<f64, Logical> {
+    (main_window_area.loc
+        + logical(
+            -main_window_area.size.w - PADDING,
+            main_window_area.size.h + PADDING,
+        ))
+    .to_f64()
+}
+
+fn get_bottom_right(main_window_area: Rectangle<i32, Logical>) -> Point<f64, Logical> {
+    (main_window_area.loc
+        + logical(
+            main_window_area.size.w + PADDING,
+            main_window_area.size.h + PADDING,
+        ))
+    .to_f64()
 }
 
 pub fn get_pos(
-    output_geoemetry: Rectangle<i32, Logical>,
+    output_geometry: Rectangle<i32, Logical>,
     direction: &WindowPosition,
 ) -> Point<f64, Logical> {
-    let (left, top, right, bottom) = get_left_top_right_bottom(output_geoemetry);
     match direction {
-        WindowPosition::Left => left,
-        WindowPosition::Top => top,
-        WindowPosition::Right => right,
-        WindowPosition::Bottom => bottom,
+        WindowPosition::TopLeft => get_top_left(output_geometry),
+        WindowPosition::Top => get_top(output_geometry),
+        WindowPosition::TopRight => get_top_right(output_geometry),
+        WindowPosition::Right => get_right(output_geometry),
+        WindowPosition::BottomRight => get_bottom_right(output_geometry),
+        WindowPosition::Bottom => get_bottom(output_geometry),
+        WindowPosition::BottomLeft => get_bottom_left(output_geometry),
+        WindowPosition::Left => get_left(output_geometry),
     }
+}
+
+pub fn get_position(
+    main_window_loc: Point<f64, Logical>,
+    main_window_size: Size<i32, Logical>,
+    pos: Point<f64, Logical>,
+) -> Point<f64, Logical> {
+    let delta = pos - main_window_loc;
+    logical(
+        delta.x / (f64::from(main_window_size.w) + f64::from(PADDING)),
+        delta.y / (f64::from(main_window_size.h) + f64::from(PADDING)),
+    )
 }
 
 pub fn position_windows(s: &mut Smallvil, pos: Point<f64, Logical>) {
@@ -230,26 +291,59 @@ pub fn position_windows(s: &mut Smallvil, pos: Point<f64, Logical>) {
     };
 
     let main_window_loc = main_window_area.loc.to_f64();
-    let delta = pos - main_window_loc;
-    let p = logical(
-        delta.x / (f64::from(main_window_area.size.w) + f64::from(PADDING)),
-        delta.y / (f64::from(main_window_area.size.h) + f64::from(PADDING)),
-    );
+    let p = get_position(main_window_loc, main_window_area.size, pos);
 
-    let (left_pos, top_pos, right_pos, bottom_pos) = get_left_top_right_bottom(main_window_area);
-    info!(
-        "p: {:?}, main_window_loc: {:?}, left_pos: {:?}",
-        p, main_window_loc, left_pos
-    );
+    info!("p: {:?}, main_window_loc: {:?}", p, main_window_loc);
 
-    let left_position =
-        clamp_to_line(main_window_loc, left_pos, distance(logical(-1.0, 0.0), p)).to_i32_round();
-    let top_position =
-        clamp_to_line(main_window_loc, top_pos, distance(logical(0.0, -1.0), p)).to_i32_round();
-    let right_position =
-        clamp_to_line(main_window_loc, right_pos, distance(logical(1.0, 0.0), p)).to_i32_round();
-    let bottom_position =
-        clamp_to_line(main_window_loc, bottom_pos, distance(logical(0.0, 1.0), p)).to_i32_round();
+    let left_position = clamp_to_line(
+        main_window_loc,
+        get_left(main_window_area),
+        distance(logical(-1.0, 0.0), p),
+    )
+    .to_i32_round();
+    let top_position = clamp_to_line(
+        main_window_loc,
+        get_top(main_window_area),
+        distance(logical(0.0, -1.0), p),
+    )
+    .to_i32_round();
+    let right_position = clamp_to_line(
+        main_window_loc,
+        get_right(main_window_area),
+        distance(logical(1.0, 0.0), p),
+    )
+    .to_i32_round();
+    let bottom_position = clamp_to_line(
+        main_window_loc,
+        get_bottom(main_window_area),
+        distance(logical(0.0, 1.0), p),
+    )
+    .to_i32_round();
+
+    let top_left_position = clamp_to_line(
+        main_window_loc,
+        get_top_left(main_window_area),
+        distance(logical(-1.0, -1.0), p),
+    )
+    .to_i32_round();
+    let top_right_position = clamp_to_line(
+        main_window_loc,
+        get_top_right(main_window_area),
+        distance(logical(1.0, -1.0), p),
+    )
+    .to_i32_round();
+    let bottom_left_position = clamp_to_line(
+        main_window_loc,
+        get_bottom_left(main_window_area),
+        distance(logical(-1.0, 1.0), p),
+    )
+    .to_i32_round();
+    let bottom_right_position = clamp_to_line(
+        main_window_loc,
+        get_bottom_right(main_window_area),
+        distance(logical(1.0, 1.0), p),
+    )
+    .to_i32_round();
 
     // TODO: Find a more efficient way to unmap all elements
     while let Option::Some(element) = s.space.elements().last() {
@@ -285,6 +379,38 @@ pub fn position_windows(s: &mut Smallvil, pos: Point<f64, Logical>) {
     }
     if let Some(ref bottom) = workspace.bottom_window {
         handle_window(&mut s.space, bottom, bottom_position, main_window_area.size);
+    }
+    if let Some(ref top_left) = workspace.top_left_window {
+        handle_window(
+            &mut s.space,
+            top_left,
+            top_left_position,
+            main_window_area.size,
+        );
+    }
+    if let Some(ref top_right) = workspace.top_right_window {
+        handle_window(
+            &mut s.space,
+            top_right,
+            top_right_position,
+            main_window_area.size,
+        );
+    }
+    if let Some(ref bottom_left) = workspace.bottom_left_window {
+        handle_window(
+            &mut s.space,
+            bottom_left,
+            bottom_left_position,
+            main_window_area.size,
+        );
+    }
+    if let Some(ref bottom_right) = workspace.bottom_right_window {
+        handle_window(
+            &mut s.space,
+            bottom_right,
+            bottom_right_position,
+            main_window_area.size,
+        );
     }
 }
 
@@ -618,7 +744,8 @@ impl Smallvil {
             error!("Expected state to be grabbed");
             return;
         };
-        let new_pos = old_pos + event.delta();
+        let delta = event.delta();
+        let new_pos = old_pos - logical(delta.x * 3.0, delta.y * 3.0);
         self.cur_workspace_state = WorkspaceState::Grabbed(new_pos);
     }
 
@@ -627,23 +754,32 @@ impl Smallvil {
             error!("Expected state to be grabbed");
             return;
         };
-        let (left, top, right, bottom) =
-            get_left_top_right_bottom(self.main_window_area().unwrap());
-        let left_distance = distance(pos, left);
-        let top_distance = distance(pos, top);
-        let right_distance = distance(pos, right);
-        let bottom_distance = distance(pos, bottom);
-        let end_pos = if left_distance <= top_distance
-            && left_distance <= right_distance
-            && left_distance <= bottom_distance
-        {
-            WindowPosition::Left
-        } else if top_distance <= right_distance && top_distance <= bottom_distance {
-            WindowPosition::Top
-        } else if right_distance <= bottom_distance {
-            WindowPosition::Right
+        let Option::Some(area) = self.main_window_area() else {
+            return;
+        };
+        let pos = get_position(area.loc.to_f64(), area.size, pos);
+        let end_pos = if pos.y < -0.5 {
+            if pos.x < -0.5 {
+                WindowPosition::TopLeft
+            } else if pos.x < 0.5 {
+                WindowPosition::Top
+            } else {
+                WindowPosition::TopRight
+            }
+        } else if pos.y < 0.5 {
+            if pos.x < 0.0 {
+                WindowPosition::Left
+            } else {
+                WindowPosition::Right
+            }
         } else {
-            WindowPosition::Bottom
+            if pos.x < -0.5 {
+                WindowPosition::BottomLeft
+            } else if pos.x < 0.5 {
+                WindowPosition::Bottom
+            } else {
+                WindowPosition::BottomRight
+            }
         };
         info!("Animating 3");
         self.cur_workspace_state = WorkspaceState::Animating(AnimationInfo {
