@@ -1,10 +1,10 @@
 static POSSIBLE_BACKENDS: &[&str] = &[
     #[cfg(feature = "winit")]
-    "--winit : Run anvil as a X11 or Wayland client using winit.",
+    "winit : Run anvil as a X11 or Wayland client using winit.",
     #[cfg(feature = "udev")]
-    "--tty-udev : Run anvil as a tty udev client (requires root if without logind).",
+    "tty-udev : Run anvil as a tty udev client (requires root if without logind).",
     #[cfg(feature = "x11")]
-    "--x11 : Run anvil as an X11 client.",
+    "x11 : Run anvil as an X11 client.",
 ];
 
 #[cfg(feature = "profile-with-tracy-mem")]
@@ -28,34 +28,25 @@ fn main() {
     profiling::register_thread!("Main Thread");
 
     #[cfg(feature = "profile-with-puffin")]
-    let _server = puffin_http::Server::new(&format!("0.0.0.0:{}", puffin_http::DEFAULT_PORT)).unwrap();
+    let _server =
+        puffin_http::Server::new(&format!("0.0.0.0:{}", puffin_http::DEFAULT_PORT)).unwrap();
     #[cfg(feature = "profile-with-puffin")]
     profiling::puffin::set_scopes_on(true);
 
-    let arg = ::std::env::args().nth(1);
-    match arg.as_ref().map(|s| &s[..]) {
+    match ::std::env::args().collect::<Vec<String>>().as_slice() {
         #[cfg(feature = "winit")]
-        Some("--winit") => {
-            tracing::info!("Starting anvil with winit backend");
-            anvil::winit::run_winit();
-        }
+        [_, c] if c.as_str() == "winit" => anvil::winit::run_winit(),
+
         #[cfg(feature = "udev")]
-        Some("--tty-udev") => {
-            tracing::info!("Starting anvil on a tty using udev");
-            anvil::udev::run_udev();
-        }
+        [_, c] if c.as_str() == "tty-udev" => anvil::udev::run_udev(),
+
         #[cfg(feature = "x11")]
-        Some("--x11") => {
-            tracing::info!("Starting anvil with x11 backend");
-            anvil::x11::run_x11();
-        }
-        Some(other) => {
-            tracing::error!("Unknown backend: {}", other);
-        }
-        None => {
+        [_, c] if c.as_str() == "x11" => anvil::x11::run_x11(),
+
+        _ => {
             #[allow(clippy::disallowed_macros)]
             {
-                println!("USAGE: anvil --backend");
+                println!("USAGE: anvil backend");
                 println!();
                 println!("Possible backends are:");
                 for b in POSSIBLE_BACKENDS {

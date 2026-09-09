@@ -22,8 +22,8 @@ use smithay::{
         },
         egl::{EGLContext, EGLDisplay},
         renderer::{
-            damage::OutputDamageTracker, element::AsRenderElements, gles::GlesRenderer, Bind, ImportDma,
-            ImportMemWl,
+            damage::OutputDamageTracker, element::AsRenderElements, gles::GlesRenderer, Bind,
+            ImportDma, ImportMemWl,
         },
         vulkan::{version::Version, Instance, PhysicalDevice},
         x11::{WindowBuilder, X11Backend, X11Event, X11Surface},
@@ -45,7 +45,8 @@ use smithay::{
     wayland::{
         compositor,
         dmabuf::{
-            DmabufFeedback, DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier,
+            DmabufFeedback, DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState,
+            ImportNotifier,
         },
         presentation::Refresh,
     },
@@ -75,8 +76,18 @@ impl DmabufHandler for AnvilState<X11Data> {
         &mut self.backend_data.dmabuf_state
     }
 
-    fn dmabuf_imported(&mut self, _global: &DmabufGlobal, dmabuf: Dmabuf, notifier: ImportNotifier) {
-        if self.backend_data.renderer.import_dmabuf(&dmabuf, None).is_ok() {
+    fn dmabuf_imported(
+        &mut self,
+        _global: &DmabufGlobal,
+        dmabuf: Dmabuf,
+        notifier: ImportNotifier,
+    ) {
+        if self
+            .backend_data
+            .renderer
+            .import_dmabuf(&dmabuf, None)
+            .is_ok()
+        {
             let _ = notifier.successful::<AnvilState<X11Data>>();
         } else {
             notifier.failed();
@@ -97,6 +108,7 @@ impl Backend for X11Data {
 }
 
 pub fn run_x11() {
+    tracing::info!("Starting anvil with x11 backend");
     let mut event_loop = EventLoop::try_new().unwrap();
     let display = Display::new().unwrap();
     let mut display_handle = display.handle();
@@ -123,7 +135,10 @@ pub fn run_x11() {
 
     let skip_vulkan = std::env::var("ANVIL_NO_VULKAN")
         .map(|x| {
-            x == "1" || x.to_lowercase() == "true" || x.to_lowercase() == "yes" || x.to_lowercase() == "y"
+            x == "1"
+                || x.to_lowercase() == "true"
+                || x.to_lowercase() == "yes"
+                || x.to_lowercase() == "y"
         })
         .unwrap_or(false);
 
@@ -131,14 +146,16 @@ pub fn run_x11() {
         Instance::new(Version::VERSION_1_2, None)
             .ok()
             .and_then(|instance| {
-                PhysicalDevice::enumerate(&instance).ok().and_then(|devices| {
-                    devices
-                        .filter(|phd| phd.has_device_extension(ext::physical_device_drm::NAME))
-                        .find(|phd| {
-                            phd.primary_node().unwrap() == Some(node)
-                                || phd.render_node().unwrap() == Some(node)
-                        })
-                })
+                PhysicalDevice::enumerate(&instance)
+                    .ok()
+                    .and_then(|devices| {
+                        devices
+                            .filter(|phd| phd.has_device_extension(ext::physical_device_drm::NAME))
+                            .find(|phd| {
+                                phd.primary_node().unwrap() == Some(node)
+                                    || phd.render_node().unwrap() == Some(node)
+                            })
+                    })
             })
             .and_then(|physical_device| {
                 VulkanAllocator::new(
@@ -176,7 +193,8 @@ pub fn run_x11() {
     };
 
     #[cfg_attr(not(feature = "egl"), allow(unused_mut))]
-    let mut renderer = unsafe { GlesRenderer::new(context) }.expect("Failed to initialize renderer");
+    let mut renderer =
+        unsafe { GlesRenderer::new(context) }.expect("Failed to initialize renderer");
 
     #[cfg(feature = "egl")]
     if renderer.bind_wl_display(&display.handle()).is_ok() {
@@ -206,10 +224,12 @@ pub fn run_x11() {
 
     #[cfg(feature = "debug")]
     #[allow(deprecated)]
-    let fps_image =
-        image::io::Reader::with_format(std::io::Cursor::new(FPS_NUMBERS_PNG), image::ImageFormat::Png)
-            .decode()
-            .unwrap();
+    let fps_image = image::io::Reader::with_format(
+        std::io::Cursor::new(FPS_NUMBERS_PNG),
+        image::ImageFormat::Png,
+    )
+    .decode()
+    .unwrap();
     #[cfg(feature = "debug")]
     let fps_texture = renderer
         .import_memory(
@@ -314,7 +334,10 @@ pub fn run_x11() {
             #[cfg(feature = "debug")]
             fps_element.update_fps(fps);
 
-            let (mut buffer, age) = backend_data.surface.buffer().expect("gbm device was destroyed");
+            let (mut buffer, age) = backend_data
+                .surface
+                .buffer()
+                .expect("gbm device was destroyed");
             let mut fb = match backend_data.renderer.bind(&mut buffer) {
                 Ok(fb) => fb,
                 Err(err) => {
@@ -346,19 +369,20 @@ pub fn run_x11() {
             let cursor_visible = !matches!(state.cursor_status, CursorImageStatus::Surface(_));
 
             let scale = Scale::from(output.current_scale().fractional_scale());
-            let cursor_hotspot = if let CursorImageStatus::Surface(ref surface) = state.cursor_status {
-                compositor::with_states(surface, |states| {
-                    states
-                        .data_map
-                        .get::<Mutex<CursorImageAttributes>>()
-                        .unwrap()
-                        .lock()
-                        .unwrap()
-                        .hotspot
-                })
-            } else {
-                (0, 0).into()
-            };
+            let cursor_hotspot =
+                if let CursorImageStatus::Surface(ref surface) = state.cursor_status {
+                    compositor::with_states(surface, |states| {
+                        states
+                            .data_map
+                            .get::<Mutex<CursorImageAttributes>>()
+                            .unwrap()
+                            .lock()
+                            .unwrap()
+                            .hotspot
+                    })
+                } else {
+                    (0, 0).into()
+                };
             let cursor_pos = state.pointer.current_location();
 
             pointer_element.set_status(state.cursor_status.clone());
@@ -425,7 +449,9 @@ pub fn run_x11() {
                             output
                                 .current_mode()
                                 .map(|mode| {
-                                    Refresh::fixed(Duration::from_secs_f64(1_000f64 / mode.refresh as f64))
+                                    Refresh::fixed(Duration::from_secs_f64(
+                                        1_000f64 / mode.refresh as f64,
+                                    ))
                                 })
                                 .unwrap_or(Refresh::Unknown),
                             0,
@@ -437,13 +463,21 @@ pub fn run_x11() {
                     if rendered {
                         if let Some(renderdoc) = state.renderdoc.as_mut() {
                             renderdoc.end_frame_capture(
-                                state.backend_data.renderer.egl_context().get_context_handle(),
+                                state
+                                    .backend_data
+                                    .renderer
+                                    .egl_context()
+                                    .get_context_handle(),
                                 std::ptr::null(),
                             );
                         }
                     } else if let Some(renderdoc) = state.renderdoc.as_mut() {
                         renderdoc.discard_frame_capture(
-                            state.backend_data.renderer.egl_context().get_context_handle(),
+                            state
+                                .backend_data
+                                .renderer
+                                .egl_context()
+                                .get_context_handle(),
                             std::ptr::null(),
                         );
                     }
