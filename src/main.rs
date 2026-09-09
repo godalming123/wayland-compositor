@@ -59,13 +59,10 @@ fn main() {
         subscriber.init();
     }
 
-    let winnit = String::from("winnit");
-    let tty_udev = String::from("tty-udev");
-    let help = String::from("help");
     match std::env::args().collect::<Vec<String>>().as_slice() {
-        [_, c] if *c == winnit => run_winnit(),
-        [_, c] if *c == tty_udev => run_udev(),
-        [_, c] if *c == help => {
+        [_, c] if c.as_str() == "winnit" => run_winnit(),
+        [_, c] if c.as_str() == "tty-udev" => run_udev(),
+        [_, c] if c.as_str() == "help" => {
             print_help();
         }
         _ => {
