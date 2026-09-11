@@ -1,6 +1,8 @@
 use std::{convert::TryInto, process::Command, sync::atomic::Ordering};
 
-use crate::{focus::PointerFocusTarget, shell::FullscreenSurface, AnvilState};
+use crate::{
+    extra_state::WindowPosition, focus::PointerFocusTarget, shell::FullscreenSurface, AnvilState,
+};
 
 #[cfg(feature = "udev")]
 use crate::udev::UdevData;
@@ -1349,6 +1351,7 @@ impl AnvilState<UdevData> {
 #[allow(dead_code)] // some of these are only read if udev is enabled
 #[derive(Debug)]
 enum KeyAction {
+    FocusInDirection(WindowPosition),
     /// Quit the compositor
     Quit,
     /// Trigger a vt-switch

@@ -11,20 +11,23 @@ use smithay::{
     backend::{
         input::TabletToolDescriptor,
         renderer::element::{
-            default_primary_scanout_output_compare, utils::select_dmabuf_feedback, RenderElementStates,
+            default_primary_scanout_output_compare, utils::select_dmabuf_feedback,
+            RenderElementStates,
         },
     },
     delegate_compositor, delegate_data_control, delegate_data_device, delegate_fractional_scale,
     delegate_input_method_manager, delegate_keyboard_shortcuts_inhibit, delegate_layer_shell,
-    delegate_output, delegate_pointer_constraints, delegate_pointer_gestures, delegate_presentation,
-    delegate_primary_selection, delegate_relative_pointer, delegate_seat, delegate_security_context,
-    delegate_shm, delegate_tablet_manager, delegate_text_input_manager, delegate_viewporter,
-    delegate_virtual_keyboard_manager, delegate_xdg_activation, delegate_xdg_decoration, delegate_xdg_shell,
+    delegate_output, delegate_pointer_constraints, delegate_pointer_gestures,
+    delegate_presentation, delegate_primary_selection, delegate_relative_pointer, delegate_seat,
+    delegate_security_context, delegate_shm, delegate_tablet_manager, delegate_text_input_manager,
+    delegate_viewporter, delegate_virtual_keyboard_manager, delegate_xdg_activation,
+    delegate_xdg_decoration, delegate_xdg_shell,
     desktop::{
         space::SpaceElement,
         utils::{
             surface_presentation_feedback_flags_from_states, surface_primary_scanout_output,
-            update_surface_primary_scanout_output, with_surfaces_surface_tree, OutputPresentationFeedback,
+            update_surface_primary_scanout_output, with_surfaces_surface_tree,
+            OutputPresentationFeedback,
         },
         PopupKind, PopupManager, Space,
     },
@@ -37,7 +40,8 @@ use smithay::{
     reexports::{
         calloop::{generic::Generic, Interest, LoopHandle, Mode, PostAction},
         wayland_protocols::xdg::decoration::{
-            self as xdg_decoration, zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
+            self as xdg_decoration,
+            zv1::server::zxdg_toplevel_decoration_v1::Mode as DecorationMode,
         },
         wayland_server::{
             backend::{ClientData, ClientId, DisconnectReason},
@@ -48,29 +52,39 @@ use smithay::{
     utils::{Clock, Logical, Monotonic, Point, Rectangle, Time},
     wayland::{
         commit_timing::{CommitTimerBarrierStateUserData, CommitTimingManagerState},
-        compositor::{get_parent, with_states, CompositorClientState, CompositorHandler, CompositorState},
+        compositor::{
+            get_parent, with_states, CompositorClientState, CompositorHandler, CompositorState,
+        },
         dmabuf::DmabufFeedback,
         fifo::{FifoBarrierCachedState, FifoManagerState},
-        fractional_scale::{with_fractional_scale, FractionalScaleHandler, FractionalScaleManagerState},
+        fractional_scale::{
+            with_fractional_scale, FractionalScaleHandler, FractionalScaleManagerState,
+        },
         input_method::{InputMethodHandler, InputMethodManagerState, PopupSurface},
         keyboard_shortcuts_inhibit::{
-            KeyboardShortcutsInhibitHandler, KeyboardShortcutsInhibitState, KeyboardShortcutsInhibitor,
+            KeyboardShortcutsInhibitHandler, KeyboardShortcutsInhibitState,
+            KeyboardShortcutsInhibitor,
         },
         output::{OutputHandler, OutputManagerState},
-        pointer_constraints::{with_pointer_constraint, PointerConstraintsHandler, PointerConstraintsState},
+        pointer_constraints::{
+            with_pointer_constraint, PointerConstraintsHandler, PointerConstraintsState,
+        },
         pointer_gestures::PointerGesturesState,
         presentation::PresentationState,
         relative_pointer::RelativePointerManagerState,
         seat::WaylandFocus,
         security_context::{
-            SecurityContext, SecurityContextHandler, SecurityContextListenerSource, SecurityContextState,
+            SecurityContext, SecurityContextHandler, SecurityContextListenerSource,
+            SecurityContextState,
         },
         selection::{
             data_device::{
                 set_data_device_focus, ClientDndGrabHandler, DataDeviceHandler, DataDeviceState,
                 ServerDndGrabHandler,
             },
-            primary_selection::{set_primary_focus, PrimarySelectionHandler, PrimarySelectionState},
+            primary_selection::{
+                set_primary_focus, PrimarySelectionHandler, PrimarySelectionState,
+            },
             wlr_data_control::{DataControlHandler, DataControlState},
             SelectionHandler,
         },
@@ -98,6 +112,7 @@ use smithay::{
 #[cfg(feature = "xwayland")]
 use crate::cursor::Cursor;
 use crate::{
+    extra_state::{AnvilWorkspace, WindowPosition, WorkspaceState, EMPTY_WORKSPACE},
     focus::{KeyboardFocusTarget, PointerFocusTarget},
     shell::WindowElement,
 };
@@ -125,6 +140,12 @@ impl ClientData for ClientState {
 
 #[derive(Debug)]
 pub struct AnvilState<BackendData: Backend + 'static> {
+    pub cur_workspace: usize,
+    pub cur_workspace_focussed_window: WindowPosition,
+    pub cur_workspace_state: WorkspaceState,
+    pub cur_monitor: usize,
+    pub workspaces: Vec<AnvilWorkspace>,
+
     pub backend_data: BackendData,
     pub socket_name: Option<String>,
     pub display_handle: DisplayHandle,
@@ -194,7 +215,12 @@ impl<BackendData: Backend> DataDeviceHandler for AnvilState<BackendData> {
 }
 
 impl<BackendData: Backend> ClientDndGrabHandler for AnvilState<BackendData> {
-    fn started(&mut self, _source: Option<WlDataSource>, icon: Option<WlSurface>, _seat: Seat<Self>) {
+    fn started(
+        &mut self,
+        _source: Option<WlDataSource>,
+        icon: Option<WlSurface>,
+        _seat: Seat<Self>,
+    ) {
         let offset = if let CursorImageStatus::Surface(ref surface) = self.cursor_status {
             with_states(surface, |states| {
                 let hotspot = states
@@ -229,7 +255,12 @@ impl<BackendData: Backend> SelectionHandler for AnvilState<BackendData> {
     type SelectionUserData = ();
 
     #[cfg(feature = "xwayland")]
-    fn new_selection(&mut self, ty: SelectionTarget, source: Option<SelectionSource>, _seat: Seat<Self>) {
+    fn new_selection(
+        &mut self,
+        ty: SelectionTarget,
+        source: Option<SelectionSource>,
+        _seat: Seat<Self>,
+    ) {
         if let Some(xwm) = self.xwm.as_mut() {
             if let Err(err) = xwm.new_selection(ty, source.map(|source| source.mime_types())) {
                 warn!(?err, ?ty, "Failed to set Xwayland selection");
@@ -332,7 +363,9 @@ impl<BackendData: Backend> InputMethodHandler for AnvilState<BackendData> {
     fn parent_geometry(&self, parent: &WlSurface) -> Rectangle<i32, smithay::utils::Logical> {
         self.space
             .elements()
-            .find_map(|window| (window.wl_surface().as_deref() == Some(parent)).then(|| window.geometry()))
+            .find_map(|window| {
+                (window.wl_surface().as_deref() == Some(parent)).then(|| window.geometry())
+            })
             .unwrap_or_default()
     }
 }
@@ -510,8 +543,9 @@ impl<BackendData: Backend> FractionalScaleHandler for AnvilState<BackendData> {
                             })
                         })
                     } else {
-                        self.window_for_surface(&root)
-                            .and_then(|window| self.space.outputs_for_element(&window).first().cloned())
+                        self.window_for_surface(&root).and_then(|window| {
+                            self.space.outputs_for_element(&window).first().cloned()
+                        })
                     }
                 })
                 .or_else(|| self.space.outputs().next().cloned());
@@ -526,7 +560,11 @@ impl<BackendData: Backend> FractionalScaleHandler for AnvilState<BackendData> {
 delegate_fractional_scale!(@<BackendData: Backend + 'static> AnvilState<BackendData>);
 
 impl<BackendData: Backend + 'static> SecurityContextHandler for AnvilState<BackendData> {
-    fn context_created(&mut self, source: SecurityContextListenerSource, security_context: SecurityContext) {
+    fn context_created(
+        &mut self,
+        source: SecurityContextListenerSource,
+        security_context: SecurityContext,
+    ) {
         self.handle
             .insert_source(source, move |client_stream, _, data| {
                 let client_state = ClientState {
@@ -673,6 +711,12 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
         XWaylandKeyboardGrabState::new::<Self>(&dh.clone());
 
         AnvilState {
+            cur_workspace: 0,
+            cur_workspace_focussed_window: WindowPosition::TopLeft,
+            cur_workspace_state: WorkspaceState::Normal,
+            cur_monitor: 0,
+            workspaces: vec![EMPTY_WORKSPACE],
+
             backend_data,
             display_handle: dh,
             socket_name,
@@ -768,7 +812,10 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
                 }
             });
         if let Err(e) = ret {
-            tracing::error!("Failed to insert the XWaylandSource into the event loop: {}", e);
+            tracing::error!(
+                "Failed to insert the XWaylandSource into the event loop: {}",
+                e
+            );
         }
     }
 }
@@ -841,7 +888,8 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
 
         let dh = self.display_handle.clone();
         for client in clients.into_values() {
-            self.client_compositor_state(&client).blocker_cleared(self, &dh);
+            self.client_compositor_state(&client)
+                .blocker_cleared(self, &dh);
         }
     }
 
@@ -864,7 +912,8 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
 
                 if let Some(output) = primary_scanout_output.as_ref() {
                     with_fractional_scale(states, |fraction_scale| {
-                        fraction_scale.set_preferred_scale(output.current_scale().fractional_scale());
+                        fraction_scale
+                            .set_preferred_scale(output.current_scale().fractional_scale());
                     });
                 }
 
@@ -891,14 +940,18 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
             if self.space.outputs_for_element(window).contains(output) {
                 window.send_frame(output, time, throttle, surface_primary_scanout_output);
                 if let Some(dmabuf_feedback) = dmabuf_feedback.as_ref() {
-                    window.send_dmabuf_feedback(output, surface_primary_scanout_output, |surface, _| {
-                        select_dmabuf_feedback(
-                            surface,
-                            render_element_states,
-                            &dmabuf_feedback.render_feedback,
-                            &dmabuf_feedback.scanout_feedback,
-                        )
-                    });
+                    window.send_dmabuf_feedback(
+                        output,
+                        surface_primary_scanout_output,
+                        |surface, _| {
+                            select_dmabuf_feedback(
+                                surface,
+                                render_element_states,
+                                &dmabuf_feedback.render_feedback,
+                                &dmabuf_feedback.scanout_feedback,
+                            )
+                        },
+                    );
                 }
             }
         });
@@ -909,7 +962,8 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
 
                 if let Some(output) = primary_scanout_output.as_ref() {
                     with_fractional_scale(states, |fraction_scale| {
-                        fraction_scale.set_preferred_scale(output.current_scale().fractional_scale());
+                        fraction_scale
+                            .set_preferred_scale(output.current_scale().fractional_scale());
                     });
                 }
 
@@ -935,14 +989,18 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
 
             layer_surface.send_frame(output, time, throttle, surface_primary_scanout_output);
             if let Some(dmabuf_feedback) = dmabuf_feedback.as_ref() {
-                layer_surface.send_dmabuf_feedback(output, surface_primary_scanout_output, |surface, _| {
-                    select_dmabuf_feedback(
-                        surface,
-                        render_element_states,
-                        &dmabuf_feedback.render_feedback,
-                        &dmabuf_feedback.scanout_feedback,
-                    )
-                });
+                layer_surface.send_dmabuf_feedback(
+                    output,
+                    surface_primary_scanout_output,
+                    |surface, _| {
+                        select_dmabuf_feedback(
+                            surface,
+                            render_element_states,
+                            &dmabuf_feedback.render_feedback,
+                            &dmabuf_feedback.scanout_feedback,
+                        )
+                    },
+                );
             }
         }
         // Drop the lock to the layer map before calling blocker_cleared, which might end up
@@ -955,7 +1013,8 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
 
                 if let Some(output) = primary_scanout_output.as_ref() {
                     with_fractional_scale(states, |fraction_scale| {
-                        fraction_scale.set_preferred_scale(output.current_scale().fractional_scale());
+                        fraction_scale
+                            .set_preferred_scale(output.current_scale().fractional_scale());
                     });
                 }
 
@@ -986,7 +1045,8 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
 
                 if let Some(output) = primary_scanout_output.as_ref() {
                     with_fractional_scale(states, |fraction_scale| {
-                        fraction_scale.set_preferred_scale(output.current_scale().fractional_scale());
+                        fraction_scale
+                            .set_preferred_scale(output.current_scale().fractional_scale());
                     });
                 }
 
@@ -1013,7 +1073,8 @@ impl<BackendData: Backend + 'static> AnvilState<BackendData> {
 
         let dh = self.display_handle.clone();
         for client in clients.into_values() {
-            self.client_compositor_state(&client).blocker_cleared(self, &dh);
+            self.client_compositor_state(&client)
+                .blocker_cleared(self, &dh);
         }
     }
 }
@@ -1093,7 +1154,9 @@ pub fn take_presentation_feedback(
             window.take_presentation_feedback(
                 &mut output_presentation_feedback,
                 surface_primary_scanout_output,
-                |surface, _| surface_presentation_feedback_flags_from_states(surface, render_element_states),
+                |surface, _| {
+                    surface_presentation_feedback_flags_from_states(surface, render_element_states)
+                },
             );
         }
     });
@@ -1102,7 +1165,9 @@ pub fn take_presentation_feedback(
         layer_surface.take_presentation_feedback(
             &mut output_presentation_feedback,
             surface_primary_scanout_output,
-            |surface, _| surface_presentation_feedback_flags_from_states(surface, render_element_states),
+            |surface, _| {
+                surface_presentation_feedback_flags_from_states(surface, render_element_states)
+            },
         );
     }
 
