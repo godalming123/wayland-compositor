@@ -243,7 +243,7 @@ pub fn run_winit() {
                 };
                 output.change_current_state(Some(mode), None, None, None);
                 output.set_preferred(mode);
-                crate::shell::fixup_positions(&mut state.space, state.pointer.current_location());
+                // crate::shell::fixup_positions(&mut state.space, state.pointer.current_location());
             }
             WinitEvent::Input(event) => state.process_input_event_windowed(event, OUTPUT_NAME),
             _ => (),
@@ -262,6 +262,9 @@ pub fn run_winit() {
                     .current_mode()
                     .map(|mode| Duration::from_secs_f64(1_000f64 / mode.refresh as f64))
                     .unwrap_or_default();
+
+            crate::extra_state::update_workspace_position(&mut state);
+
             state.pre_repaint(&output, frame_target);
 
             let backend = &mut state.backend_data.backend;

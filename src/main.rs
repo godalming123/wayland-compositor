@@ -13,13 +13,20 @@ static GLOBAL: profiling::tracy_client::ProfiledAllocator<std::alloc::System> =
     profiling::tracy_client::ProfiledAllocator::new(std::alloc::System, 10);
 
 fn main() {
+    let subscriber = tracing_subscriber::fmt()
+        .compact()
+        .with_ansi(false)
+        .with_writer(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open("/tmp/wayland_compositor_logs")
+                .unwrap(),
+        );
     if let Ok(env_filter) = tracing_subscriber::EnvFilter::try_from_default_env() {
-        tracing_subscriber::fmt()
-            .compact()
-            .with_env_filter(env_filter)
-            .init();
+        subscriber.with_env_filter(env_filter).init();
     } else {
-        tracing_subscriber::fmt().compact().init();
+        subscriber.init();
     }
 
     #[cfg(feature = "profile-with-tracy")]

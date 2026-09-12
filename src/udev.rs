@@ -1212,7 +1212,7 @@ impl AnvilState<UdevData> {
         }
 
         // fixup window coordinates
-        crate::shell::fixup_positions(&mut self.space, self.pointer.current_location());
+        // crate::shell::fixup_positions(&mut self.space, self.pointer.current_location());
     }
 
     fn device_removed(&mut self, node: DrmNode) {
@@ -1249,7 +1249,7 @@ impl AnvilState<UdevData> {
             debug!("Dropping device");
         }
 
-        crate::shell::fixup_positions(&mut self.space, self.pointer.current_location());
+        // crate::shell::fixup_positions(&mut self.space, self.pointer.current_location());
     }
 
     fn frame_finish(
@@ -1492,6 +1492,7 @@ impl AnvilState<UdevData> {
             return;
         };
 
+        crate::extra_state::update_workspace_position(self);
         self.pre_repaint(&output, frame_target);
 
         let device = if let Some(device) = self.backend_data.backends.get_mut(&node) {

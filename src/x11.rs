@@ -293,7 +293,7 @@ pub fn run_x11() {
                 output.delete_mode(output.current_mode().unwrap());
                 output.change_current_state(Some(data.backend_data.mode), None, None, None);
                 output.set_preferred(data.backend_data.mode);
-                crate::shell::fixup_positions(&mut data.space, data.pointer.current_location());
+                // crate::shell::fixup_positions(&mut data.space, data.pointer.current_location());
 
                 data.backend_data.render = true;
             }
