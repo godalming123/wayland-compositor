@@ -67,7 +67,7 @@ pub const EMPTY_WORKSPACE: AnvilWorkspace = AnvilWorkspace {
     bottom_right_window: Option::None,
 };
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum WindowPosition {
     TopLeft,
     Top,
@@ -330,8 +330,10 @@ fn get_bottom_right(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Log
         )
 }
 
-fn position_windows<B: Backend>(
-    s: &mut AnvilState<B>,
+fn position_windows(
+    space: &mut Space<WindowElement>,
+    workspace: &AnvilWorkspace,
+    focussed_window: WindowPosition,
     window_areas: WorkspaceAreas<ProgressAndVelocity>,
     main_window_area: Rectangle<f64, Logical>,
     main_window_area_size: Size<i32, Logical>,
@@ -386,20 +388,23 @@ fn position_windows<B: Backend>(
     )
     .to_i32_round();
 
+    /*
     // TODO: Find a more efficient way to unmap all elements
-    while let Option::Some(element) = s.space.elements().last() {
-        s.space.unmap_elem(&element.clone());
+    while let Option::Some(element) = space.elements().last() {
+        space.unmap_elem(&element.clone());
     }
+    */
 
     fn handle_window(
         space: &mut Space<WindowElement>,
         window: &WindowElement,
         pos: Point<i32, Logical>,
         size: Size<i32, Logical>,
+        focussed: bool,
     ) {
         let geometry = window.0.geometry();
         if geometry.loc != pos {
-            space.map_element(window.clone(), pos, false);
+            space.map_element(window.clone(), pos, focussed);
         };
         if geometry.size != size {
             let xdg = window.0.toplevel().unwrap();
@@ -411,49 +416,76 @@ fn position_windows<B: Backend>(
         };
     }
 
-    let workspace = &s.workspaces[s.cur_workspace];
     if let Some(ref left) = workspace.left_window {
-        handle_window(&mut s.space, left, left_position, main_window_area_size);
+        handle_window(
+            space,
+            left,
+            left_position,
+            main_window_area_size,
+            focussed_window == WindowPosition::Left,
+        );
     }
     if let Some(ref top) = workspace.top_window {
-        handle_window(&mut s.space, top, top_position, main_window_area_size);
+        handle_window(
+            space,
+            top,
+            top_position,
+            main_window_area_size,
+            focussed_window == WindowPosition::Top,
+        );
     }
     if let Some(ref right) = workspace.right_window {
-        handle_window(&mut s.space, right, right_position, main_window_area_size);
+        handle_window(
+            space,
+            right,
+            right_position,
+            main_window_area_size,
+            focussed_window == WindowPosition::Right,
+        );
     }
     if let Some(ref bottom) = workspace.bottom_window {
-        handle_window(&mut s.space, bottom, bottom_position, main_window_area_size);
+        handle_window(
+            space,
+            bottom,
+            bottom_position,
+            main_window_area_size,
+            focussed_window == WindowPosition::Bottom,
+        );
     }
     if let Some(ref top_left) = workspace.top_left_window {
         handle_window(
-            &mut s.space,
+            space,
             top_left,
             top_left_position,
             main_window_area_size,
+            focussed_window == WindowPosition::TopLeft,
         );
     }
     if let Some(ref top_right) = workspace.top_right_window {
         handle_window(
-            &mut s.space,
+            space,
             top_right,
             top_right_position,
             main_window_area_size,
+            focussed_window == WindowPosition::TopRight,
         );
     }
     if let Some(ref bottom_left) = workspace.bottom_left_window {
         handle_window(
-            &mut s.space,
+            space,
             bottom_left,
             bottom_left_position,
             main_window_area_size,
+            focussed_window == WindowPosition::BottomLeft,
         );
     }
     if let Some(ref bottom_right) = workspace.bottom_right_window {
         handle_window(
-            &mut s.space,
+            space,
             bottom_right,
             bottom_right_position,
             main_window_area_size,
+            focussed_window == WindowPosition::BottomRight,
         );
     }
 }
@@ -522,7 +554,14 @@ pub fn update_workspace_position<B: Backend>(state: &mut AnvilState<B>) {
             )
         }
     };
-    position_windows(state, window_areas, main_window_area, main_window_area_size);
+    position_windows(
+        &mut state.space,
+        &state.workspaces[state.cur_workspace],
+        state.cur_workspace_focussed_window,
+        window_areas,
+        main_window_area,
+        main_window_area_size,
+    );
 }
 
 struct Wrapped<T> {

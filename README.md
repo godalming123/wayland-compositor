@@ -1,3 +1,6 @@
+> [!CAUTION]
+> This branch is not maintained
+
 # Anvil
 
 A compositor used as a testing ground for new smithay features.

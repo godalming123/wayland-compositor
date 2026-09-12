@@ -1,7 +1,10 @@
-use std::{convert::TryInto, process::Command, sync::atomic::Ordering};
+use std::{convert::TryInto, process::Command, sync::atomic::Ordering, time::SystemTime};
 
 use crate::{
-    extra_state::WindowPosition, focus::PointerFocusTarget, shell::FullscreenSurface, AnvilState,
+    extra_state::{WindowAreas, WindowPosition, WorkspaceState},
+    focus::PointerFocusTarget,
+    shell::FullscreenSurface,
+    AnvilState,
 };
 
 #[cfg(feature = "udev")]
@@ -76,6 +79,34 @@ impl<BackendData: Backend> AnvilState<BackendData> {
             KeyAction::Quit => {
                 info!("Quitting.");
                 self.running.store(false, Ordering::SeqCst);
+            }
+
+            KeyAction::FocusInDirection(direction) => {
+                info!("Focussing in direction {:?}", direction);
+                match self.cur_workspace_state {
+                    WorkspaceState::Grabbed(_pos) => {}
+                    WorkspaceState::Normal => {
+                        let window_areas =
+                            WindowAreas::from_position(self.cur_workspace_focussed_window);
+                        info!("Animating 1");
+                        self.cur_workspace_state =
+                            WorkspaceState::Animating(crate::extra_state::AnimationInfo {
+                                start_time: SystemTime::now(),
+                                start_info: window_areas,
+                            });
+                        self.cur_workspace_focussed_window = direction
+                    }
+                    WorkspaceState::Animating(ref info) => {
+                        let (window_areas, _finished) =
+                            WindowAreas::from_animation(info, self.cur_workspace_focussed_window);
+                        self.cur_workspace_state =
+                            WorkspaceState::Animating(crate::extra_state::AnimationInfo {
+                                start_time: SystemTime::now(),
+                                start_info: window_areas,
+                            });
+                        self.cur_workspace_focussed_window = direction;
+                    }
+                };
             }
 
             KeyAction::Run(cmd, args) => {
@@ -545,6 +576,7 @@ impl<BackendData: Backend> AnvilState<BackendData> {
                     | KeyAction::Quit
                     | KeyAction::Run(_, _)
                     | KeyAction::TogglePreview
+                    | KeyAction::FocusInDirection(_)
                     | KeyAction::ToggleDecorations => self.process_common_key_action(action),
 
                     _ => tracing::warn!(
@@ -779,6 +811,7 @@ impl AnvilState<UdevData> {
                     | KeyAction::Quit
                     | KeyAction::Run(_, _)
                     | KeyAction::TogglePreview
+                    | KeyAction::FocusInDirection(_)
                     | KeyAction::ToggleDecorations => self.process_common_key_action(action),
 
                     _ => unreachable!(),
@@ -1378,6 +1411,14 @@ fn process_keyboard_shortcut(modifiers: ModifiersState, keysym: Keysym) -> Optio
         ))
     } else if modifiers.alt || modifiers.logo {
         match keysym {
+            Keysym::y => Some(KeyAction::FocusInDirection(WindowPosition::TopLeft)),
+            Keysym::u => Some(KeyAction::FocusInDirection(WindowPosition::Top)),
+            Keysym::i => Some(KeyAction::FocusInDirection(WindowPosition::TopRight)),
+            Keysym::k => Some(KeyAction::FocusInDirection(WindowPosition::Right)),
+            Keysym::comma => Some(KeyAction::FocusInDirection(WindowPosition::BottomRight)),
+            Keysym::m | Keysym::j => Some(KeyAction::FocusInDirection(WindowPosition::Bottom)),
+            Keysym::n => Some(KeyAction::FocusInDirection(WindowPosition::BottomLeft)),
+            Keysym::h => Some(KeyAction::FocusInDirection(WindowPosition::Left)),
             Keysym::Tab => Some(KeyAction::Quit),
             Keysym::minus => Some(KeyAction::ScaleDown),
             Keysym::plus | Keysym::equal => Some(KeyAction::ScaleUp),

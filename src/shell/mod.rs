@@ -401,6 +401,33 @@ fn ensure_initial_configure(
     };
 }
 
+pub fn handle_new_window<B: Backend>(state: &mut AnvilState<B>, window: WindowElement) {
+    let workspace = &mut state.workspaces[state.cur_workspace];
+    if workspace.top_left_window.is_none() {
+        workspace.top_left_window = Some(window);
+    } else if workspace.top_window.is_none() {
+        workspace.top_window = Some(window);
+    } else if workspace.top_right_window.is_none() {
+        workspace.top_right_window = Some(window);
+    } else if workspace.right_window.is_none() {
+        workspace.right_window = Some(window);
+    } else if workspace.bottom_right_window.is_none() {
+        workspace.bottom_right_window = Some(window);
+    } else if workspace.bottom_window.is_none() {
+        workspace.bottom_window = Some(window);
+    } else if workspace.bottom_left_window.is_none() {
+        workspace.bottom_left_window = Some(window);
+    } else if workspace.left_window.is_none() {
+        workspace.left_window = Some(window);
+    } else {
+        state.cur_workspace += 1;
+        state
+            .workspaces
+            .insert(state.cur_workspace, crate::extra_state::EMPTY_WORKSPACE);
+        state.workspaces[state.cur_workspace].top_left_window = Some(window.clone());
+    }
+}
+
 /*
 fn place_new_window(
     space: &mut Space<WindowElement>,
