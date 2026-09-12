@@ -1,11 +1,11 @@
 use std::time::SystemTime;
 
 use smithay::{
-    desktop::{Space, Window},
+    desktop::Space,
     reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
     utils::{Coordinate, Logical, Point, Rectangle, Size},
 };
-use tracing::error;
+use tracing::{error, info, warn};
 
 use crate::{shell::WindowElement, state::Backend, AnvilState};
 
@@ -330,7 +330,7 @@ fn get_bottom_right(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Log
         )
 }
 
-pub fn position_windows<B: Backend>(
+fn position_windows<B: Backend>(
     s: &mut AnvilState<B>,
     window_areas: WorkspaceAreas<ProgressAndVelocity>,
     main_window_area: Rectangle<f64, Logical>,
@@ -456,6 +456,73 @@ pub fn position_windows<B: Backend>(
             main_window_area_size,
         );
     }
+}
+
+fn main_window_area<B: Backend>(
+    state: &AnvilState<B>,
+) -> Option<(
+    smithay::utils::Rectangle<f64, Logical>,
+    smithay::utils::Size<i32, Logical>,
+)> {
+    let Option::Some(output) = state.space.outputs().nth(state.cur_monitor) else {
+        warn!("Failed to get focussed monitor");
+        return Option::None;
+    };
+    let Option::Some(geometry) = state.space.output_geometry(&output) else {
+        warn!("Failed to get output geometry");
+        return Option::None;
+    };
+    let size = geometry.size - smithay::utils::Size::<i32, Logical>::new(MARGIN * 2, MARGIN * 2);
+    Option::Some((
+        smithay::utils::Rectangle::<f64, Logical>::new(
+            (geometry.loc + MARGIN_POS).to_f64(),
+            size.to_f64(),
+        ),
+        size,
+    ))
+}
+
+fn get_position(
+    main_window_area: Rectangle<f64, Logical>,
+    pos: Point<f64, Logical>,
+) -> Point<f64, Logical> {
+    let delta = pos - main_window_area.loc;
+    logical(
+        delta.x / (main_window_area.size.w + f64::from(PADDING)),
+        delta.y / (main_window_area.size.h + f64::from(PADDING)),
+    )
+}
+
+pub fn update_workspace_position<B: Backend>(state: &mut AnvilState<B>) {
+    let Option::Some((main_window_area, main_window_area_size)) = main_window_area(state) else {
+        warn!("Failed to get output geometry");
+        return;
+    };
+
+    let window_areas = match &state.cur_workspace_state {
+        WorkspaceState::Normal => {
+            // info!("Getting window areas from position");
+            WindowAreas::from_position(state.cur_workspace_focussed_window)
+        }
+        WorkspaceState::Animating(info) => {
+            // info!("Getting window areas from animation");
+            let (window_areas, finished) =
+                WindowAreas::from_animation(info, state.cur_workspace_focussed_window);
+            if finished {
+                info!("Finished animation");
+                state.cur_workspace_state = WorkspaceState::Normal;
+            }
+            window_areas
+        }
+        WorkspaceState::Grabbed(pos) => {
+            // info!("Getting window areas from grabbed");
+            WindowAreas::from_gesture(
+                state.cur_workspace_focussed_window,
+                get_position(main_window_area, *pos),
+            )
+        }
+    };
+    position_windows(state, window_areas, main_window_area, main_window_area_size);
 }
 
 struct Wrapped<T> {
