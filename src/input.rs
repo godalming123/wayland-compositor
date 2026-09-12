@@ -329,10 +329,14 @@ pub fn position_windows(
     )
     .to_i32_round();
 
+    /*
+    // This code is commented out because it seems to break all terminals (including alacritty, ghostty, and foot)
+    // TODO: Hide other windows
     // TODO: Find a more efficient way to unmap all elements
     while let Option::Some(element) = s.space.elements().last() {
         s.space.unmap_elem(&element.clone());
     }
+    */
 
     fn handle_window(
         space: &mut Space<Window>,
