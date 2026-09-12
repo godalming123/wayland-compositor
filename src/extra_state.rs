@@ -1,6 +1,13 @@
 use std::time::SystemTime;
 
-use smithay::utils::{Coordinate, Logical, Point};
+use smithay::{
+    desktop::{Space, Window},
+    reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
+    utils::{Coordinate, Logical, Point, Rectangle, Size},
+};
+use tracing::error;
+
+use crate::{shell::WindowElement, state::Backend, AnvilState};
 
 #[derive(Debug)]
 pub struct WorkspaceAreas<T> {
@@ -45,7 +52,7 @@ impl<A> WorkspaceAreas<A> {
     }
 }
 
-pub type AnvilWorkspace = WorkspaceAreas<Option<smithay::desktop::Window>>;
+pub type AnvilWorkspace = WorkspaceAreas<Option<WindowElement>>;
 pub type WindowAreas = WorkspaceAreas<ProgressAndVelocity>;
 
 pub const EMPTY_WORKSPACE: AnvilWorkspace = AnvilWorkspace {
@@ -224,6 +231,231 @@ pub enum WorkspaceState {
     Normal,
     Animating(AnimationInfo),
     Grabbed(Point<f64, Logical>),
+}
+
+const fn between(
+    a: Point<f64, Logical>,
+    b: Point<f64, Logical>,
+    b_proportion: f64,
+) -> Point<f64, Logical> {
+    let a_proportion = 1.0 - b_proportion;
+    logical(
+        a.x * a_proportion + b.x * b_proportion,
+        a.y * a_proportion + b.y * b_proportion,
+    )
+}
+
+fn clamp_to_line(
+    start: Point<f64, Logical>,
+    end: Point<f64, Logical>,
+    portion_along: f64,
+) -> Point<f64, Logical> {
+    if portion_along < 0.0 {
+        error!("portion along: {}", portion_along);
+    };
+    /*
+    let restricted_portion_along = rubber_band_delta(portion_along, 1.0);
+    */
+    let restricted_portion_along = portion_along.max(0.0).min(1.0);
+    // info!(
+    //     "Portion along: {}, restricted portion along: {}",
+    //     portion_along, restricted_portion_along
+    // );
+    between(start, end, restricted_portion_along)
+    /*
+    let (left, right, top, bottom) = get_left_right_top_bottom_for_points(start, end);
+    if clamped_to_line.x < left.x {
+        clamp_to_point(left, clamped_to_line, distance(start, end))
+    } else if clamped_to_line.x > right.x {
+        clamp_to_point(right, clamped_to_line, distance(start, end))
+    } else if clamped_to_line.y < top.y {
+        clamp_to_point(top, clamped_to_line, distance(start, end))
+    } else if clamped_to_line.y > bottom.y {
+        clamp_to_point(bottom, clamped_to_line, distance(start, end))
+    } else {
+        clamped_to_line
+    }
+    */
+}
+
+pub const PADDING: i32 = 10;
+pub const MARGIN: i32 = 50;
+pub const MARGIN_POS: Point<i32, Logical> = logical(MARGIN, MARGIN);
+
+fn get_left(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    main_window_area.loc + logical(-main_window_area.size.w - f64::from(PADDING), 0.0)
+}
+
+fn get_top(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    main_window_area.loc + logical(0.0, -main_window_area.size.h - f64::from(PADDING))
+}
+
+fn get_right(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    main_window_area.loc + logical(main_window_area.size.w + f64::from(PADDING), 0.0)
+}
+
+fn get_bottom(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    main_window_area.loc + logical(0.0, main_window_area.size.h + f64::from(PADDING))
+}
+
+fn get_top_left(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    main_window_area.loc
+        + logical(
+            -main_window_area.size.w - f64::from(PADDING),
+            -main_window_area.size.h - f64::from(PADDING),
+        )
+}
+
+fn get_top_right(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    main_window_area.loc
+        + logical(
+            main_window_area.size.w + f64::from(PADDING),
+            -main_window_area.size.h - f64::from(PADDING),
+        )
+}
+
+fn get_bottom_left(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    main_window_area.loc
+        + logical(
+            -main_window_area.size.w - f64::from(PADDING),
+            main_window_area.size.h + f64::from(PADDING),
+        )
+}
+
+fn get_bottom_right(main_window_area: Rectangle<f64, Logical>) -> Point<f64, Logical> {
+    main_window_area.loc
+        + logical(
+            main_window_area.size.w + f64::from(PADDING),
+            main_window_area.size.h + f64::from(PADDING),
+        )
+}
+
+pub fn position_windows<B: Backend>(
+    s: &mut AnvilState<B>,
+    window_areas: WorkspaceAreas<ProgressAndVelocity>,
+    main_window_area: Rectangle<f64, Logical>,
+    main_window_area_size: Size<i32, Logical>,
+) {
+    let left_position = clamp_to_line(
+        main_window_area.loc,
+        get_left(main_window_area),
+        window_areas.left_window.progress,
+    )
+    .to_i32_round();
+    let top_position = clamp_to_line(
+        main_window_area.loc,
+        get_top(main_window_area),
+        window_areas.top_window.progress,
+    )
+    .to_i32_round();
+    let right_position = clamp_to_line(
+        main_window_area.loc,
+        get_right(main_window_area),
+        window_areas.right_window.progress,
+    )
+    .to_i32_round();
+    let bottom_position = clamp_to_line(
+        main_window_area.loc,
+        get_bottom(main_window_area),
+        window_areas.bottom_window.progress,
+    )
+    .to_i32_round();
+
+    let top_left_position = clamp_to_line(
+        main_window_area.loc,
+        get_top_left(main_window_area),
+        window_areas.top_left_window.progress,
+    )
+    .to_i32_round();
+    let top_right_position = clamp_to_line(
+        main_window_area.loc,
+        get_top_right(main_window_area),
+        window_areas.top_right_window.progress,
+    )
+    .to_i32_round();
+    let bottom_left_position = clamp_to_line(
+        main_window_area.loc,
+        get_bottom_left(main_window_area),
+        window_areas.bottom_left_window.progress,
+    )
+    .to_i32_round();
+    let bottom_right_position = clamp_to_line(
+        main_window_area.loc,
+        get_bottom_right(main_window_area),
+        window_areas.bottom_right_window.progress,
+    )
+    .to_i32_round();
+
+    // TODO: Find a more efficient way to unmap all elements
+    while let Option::Some(element) = s.space.elements().last() {
+        s.space.unmap_elem(&element.clone());
+    }
+
+    fn handle_window(
+        space: &mut Space<WindowElement>,
+        window: &WindowElement,
+        pos: Point<i32, Logical>,
+        size: Size<i32, Logical>,
+    ) {
+        let geometry = window.0.geometry();
+        if geometry.loc != pos {
+            space.map_element(window.clone(), pos, false);
+        };
+        if geometry.size != size {
+            let xdg = window.0.toplevel().unwrap();
+            xdg.with_pending_state(|state| {
+                state.states.set(xdg_toplevel::State::Resizing);
+                state.size = Option::Some(size);
+            });
+            xdg.send_pending_configure();
+        };
+    }
+
+    let workspace = &s.workspaces[s.cur_workspace];
+    if let Some(ref left) = workspace.left_window {
+        handle_window(&mut s.space, left, left_position, main_window_area_size);
+    }
+    if let Some(ref top) = workspace.top_window {
+        handle_window(&mut s.space, top, top_position, main_window_area_size);
+    }
+    if let Some(ref right) = workspace.right_window {
+        handle_window(&mut s.space, right, right_position, main_window_area_size);
+    }
+    if let Some(ref bottom) = workspace.bottom_window {
+        handle_window(&mut s.space, bottom, bottom_position, main_window_area_size);
+    }
+    if let Some(ref top_left) = workspace.top_left_window {
+        handle_window(
+            &mut s.space,
+            top_left,
+            top_left_position,
+            main_window_area_size,
+        );
+    }
+    if let Some(ref top_right) = workspace.top_right_window {
+        handle_window(
+            &mut s.space,
+            top_right,
+            top_right_position,
+            main_window_area_size,
+        );
+    }
+    if let Some(ref bottom_left) = workspace.bottom_left_window {
+        handle_window(
+            &mut s.space,
+            bottom_left,
+            bottom_left_position,
+            main_window_area_size,
+        );
+    }
+    if let Some(ref bottom_right) = workspace.bottom_right_window {
+        handle_window(
+            &mut s.space,
+            bottom_right,
+            bottom_right_position,
+            main_window_area_size,
+        );
+    }
 }
 
 struct Wrapped<T> {
