@@ -29,9 +29,10 @@
 
 # Fixes
 
-- [ ] Fix ghostty not working
-- [ ] Fix the weird black bars around firefox
+- [x] Fix ghostty not working
+- [x] Fix the weird black bars around firefox
 - [ ] Remove a window from it's workspace when it unmaps itself
+- [ ] Fix wl-copy and wl-paste
 
 # Wayland support
 
