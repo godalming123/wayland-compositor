@@ -15,13 +15,16 @@ use smithay::input::{
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::reexports::wayland_server::Resource;
 use smithay::wayland::output::OutputHandler;
-use smithay::wayland::selection::data_device::{
-    set_data_device_focus, ClientDndGrabHandler, DataDeviceHandler, DataDeviceState,
-    ServerDndGrabHandler,
+use smithay::wayland::selection::{
+    data_device::{
+        set_data_device_focus, ClientDndGrabHandler, DataDeviceHandler, DataDeviceState,
+        ServerDndGrabHandler,
+    },
+    wlr_data_control::{DataControlHandler, DataControlState},
 };
 use smithay::wayland::selection::SelectionHandler;
 use smithay::{
-    delegate_data_device, delegate_output, delegate_seat,
+    delegate_data_control, delegate_data_device, delegate_output, delegate_seat,
     utils::Point,
     wayland::compositor::with_states,
 };
@@ -102,6 +105,18 @@ impl ClientDndGrabHandler for Smallvil {
 impl ServerDndGrabHandler for Smallvil {}
 
 delegate_data_device!(Smallvil);
+
+//
+// Wlr Data Control
+//
+
+impl DataControlHandler for Smallvil {
+    fn data_control_state(&self) -> &DataControlState {
+        &self.data_control_state
+    }
+}
+
+delegate_data_control!(Smallvil);
 
 //
 // Wl Output & Xdg Output

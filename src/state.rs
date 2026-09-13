@@ -39,7 +39,10 @@ use smithay::{
         dmabuf::DmabufFeedback,
         output::OutputManagerState,
         presentation::PresentationState,
-        selection::data_device::DataDeviceState,
+        selection::{
+            data_device::DataDeviceState,
+            wlr_data_control::DataControlState,
+        },
         shell::xdg::XdgShellState,
         shm::ShmState,
         socket::ListeningSocketSource,
@@ -342,6 +345,7 @@ pub struct Smallvil {
     pub output_manager_state: OutputManagerState,
     pub seat_state: SeatState<Smallvil>,
     pub data_device_state: DataDeviceState,
+    pub data_control_state: DataControlState,
     pub popups: PopupManager,
     #[allow(dead_code)]
     pub presentation_state: PresentationState,
@@ -367,6 +371,7 @@ impl Smallvil {
         let output_manager_state = OutputManagerState::new_with_xdg_output::<Self>(&dh);
         let mut seat_state = SeatState::new();
         let data_device_state = DataDeviceState::new::<Self>(&dh);
+        let data_control_state = DataControlState::new::<Self, _>(&dh, None, |_| true);
         let popups = PopupManager::default();
         let presentation_state = PresentationState::new::<Self>(&dh, clock.id() as u32);
 
@@ -424,6 +429,7 @@ impl Smallvil {
             output_manager_state,
             seat_state,
             data_device_state,
+            data_control_state,
             popups,
             presentation_state,
             seat,

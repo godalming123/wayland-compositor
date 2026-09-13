@@ -32,10 +32,12 @@
 - [x] Fix ghostty not working
 - [x] Fix the weird black bars around firefox
 - [ ] Remove a window from it's workspace when it unmaps itself
-- [ ] Fix wl-copy and wl-paste
+- [x] Fix wl-copy and wl-paste removing the focus from the focussed window
 - [ ] Fix an issue where the focussed window does not register your mouse hovering over an element
 
 # Wayland support
 
 - [ ] Support drag icons
 - [ ] Support layer shell maybe
+- [x] Support wlr data control for clipboard
+- [ ] Support gammastep
