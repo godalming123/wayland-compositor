@@ -64,6 +64,7 @@ fn parse_pressed_key(
     if modifiers.alt || modifiers.logo {
         match sym {
             Keysym::Tab => FilterResult::Intercept(Action::Quit),
+            Keysym::d => FilterResult::Intercept(Action::CloseFocussedWindow),
             Keysym::f => FilterResult::Intercept(Action::SpawnCommand("firefox", vec![])),
             Keysym::g => FilterResult::Intercept(Action::SpawnCommand("ghostty", vec![])),
             Keysym::b => {
@@ -462,44 +463,15 @@ fn is_focussed_window(window: &Option<smithay::desktop::Window>, focussed: &WlSu
 }
 
 fn close_focussed_window(state: &mut Smallvil) {
-    let Some(keyboard) = state.seat.get_keyboard() else {
-        error!("Failed to get keyboard");
-        return;
-    };
-    let Some(focussed) = keyboard.current_focus() else {
-        info!("No window is focussed");
-        return;
-    };
-
-    // Find the slot of the current workspace that holds the focussed window.
-    let workspace = &mut state.workspaces[state.cur_workspace];
-    let closed = if is_focussed_window(&workspace.left_window, &focussed) {
-        workspace.left_window.take()
-    } else if is_focussed_window(&workspace.top_window, &focussed) {
-        workspace.top_window.take()
-    } else if is_focussed_window(&workspace.right_window, &focussed) {
-        workspace.right_window.take()
-    } else if is_focussed_window(&workspace.bottom_window, &focussed) {
-        workspace.bottom_window.take()
-    } else {
-        Option::None
-    };
-
-    let Some(window) = closed else {
-        warn!("The focussed window is not part of the current workspace");
-        return;
-    };
-
-    info!("Closing focussed window");
-    window.toplevel().unwrap().send_close();
-    state.space.unmap_elem(&window);
-
-    // The window is going away, so drop the keyboard focus on it.
-    keyboard.set_focus(
-        state,
-        Option::<WlSurface>::None,
-        SERIAL_COUNTER.next_serial(),
-    );
+    match state.workspaces[state.cur_workspace].get(state.cur_workspace_focussed_window) {
+        Some(window) => {
+            info!("Closing focussed window");
+            window.toplevel().unwrap().send_close();
+        }
+        None => {
+            info!("No focussed window to close");
+        }
+    }
 }
 
 fn handle_key_action(state: &mut Smallvil, action: Action) {
