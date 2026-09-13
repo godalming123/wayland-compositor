@@ -10,7 +10,7 @@ use smithay::{
         },
         session::Session,
     },
-    desktop::{Space, Window},
+    desktop::Window,
     input::{
         keyboard::{keysyms as xkb, FilterResult, Keysym},
         pointer::{AxisFrame, ButtonEvent, MotionEvent},
@@ -338,71 +338,107 @@ pub fn position_windows(
     }
     */
 
-    fn handle_window(
-        space: &mut Space<Window>,
-        window: &Window,
-        pos: Point<i32, Logical>,
-        size: Size<i32, Logical>,
-    ) {
+    let mut handle_window = |window: &Window, pos: Point<i32, Logical>, focus: bool| {
         let geometry = window.geometry();
         if geometry.loc != pos {
-            space.map_element(window.clone(), pos, false);
+            s.space.map_element(window.clone(), pos, false);
         };
-        if geometry.size != size {
-            let xdg = window.toplevel().unwrap();
-            xdg.with_pending_state(|state| {
-                state.states.set(xdg_toplevel::State::Resizing);
-                state.size = Option::Some(size);
-            });
+        let mut send_pending_configure = false;
+        let xdg = window.toplevel().unwrap();
+        xdg.with_pending_state(|state| {
+            state.states.set(xdg_toplevel::State::Resizing);
+            match (state.states.contains(xdg_toplevel::State::Activated), focus) {
+                (true, false) => {
+                    state.states.unset(xdg_toplevel::State::Activated);
+                    send_pending_configure = true;
+                }
+                (false, true) => {
+                    state.states.set(xdg_toplevel::State::Activated);
+                    send_pending_configure = true;
+                }
+                _ => {}
+            };
+            if geometry.size != main_window_area_size {
+                state.size = Option::Some(main_window_area_size);
+                send_pending_configure = true;
+            }
+        });
+        if send_pending_configure {
             xdg.send_pending_configure();
-        };
-    }
+        }
+    };
 
     let workspace = &s.workspaces[s.cur_workspace];
     if let Some(ref left) = workspace.left_window {
-        handle_window(&mut s.space, left, left_position, main_window_area_size);
+        handle_window(
+            left,
+            left_position,
+            s.cur_workspace_focussed_window == WindowPosition::Left,
+        );
     }
     if let Some(ref top) = workspace.top_window {
-        handle_window(&mut s.space, top, top_position, main_window_area_size);
+        handle_window(
+            top,
+            top_position,
+            s.cur_workspace_focussed_window == WindowPosition::Top,
+        );
     }
     if let Some(ref right) = workspace.right_window {
-        handle_window(&mut s.space, right, right_position, main_window_area_size);
+        handle_window(
+            right,
+            right_position,
+            s.cur_workspace_focussed_window == WindowPosition::Right,
+        );
     }
     if let Some(ref bottom) = workspace.bottom_window {
-        handle_window(&mut s.space, bottom, bottom_position, main_window_area_size);
+        handle_window(
+            bottom,
+            bottom_position,
+            s.cur_workspace_focussed_window == WindowPosition::Bottom,
+        );
     }
     if let Some(ref top_left) = workspace.top_left_window {
         handle_window(
-            &mut s.space,
             top_left,
             top_left_position,
-            main_window_area_size,
+            s.cur_workspace_focussed_window == WindowPosition::TopLeft,
         );
     }
     if let Some(ref top_right) = workspace.top_right_window {
         handle_window(
-            &mut s.space,
             top_right,
             top_right_position,
-            main_window_area_size,
+            s.cur_workspace_focussed_window == WindowPosition::TopRight,
         );
     }
     if let Some(ref bottom_left) = workspace.bottom_left_window {
         handle_window(
-            &mut s.space,
             bottom_left,
             bottom_left_position,
-            main_window_area_size,
+            s.cur_workspace_focussed_window == WindowPosition::BottomLeft,
         );
     }
     if let Some(ref bottom_right) = workspace.bottom_right_window {
         handle_window(
-            &mut s.space,
             bottom_right,
             bottom_right_position,
-            main_window_area_size,
+            s.cur_workspace_focussed_window == WindowPosition::BottomRight,
         );
     }
+
+    let keyboard = s.seat.get_keyboard().unwrap();
+    let serial = SERIAL_COUNTER.next_serial();
+    let focussed_maybe = workspace.get(s.cur_workspace_focussed_window);
+    if let Some(focussed) = focussed_maybe {
+        s.space.raise_element(&focussed, true);
+    }
+    keyboard.set_focus(
+        s,
+        focussed_maybe
+            .clone()
+            .map(|window| window.toplevel().unwrap().wl_surface().clone()),
+        serial,
+    );
 }
 
 fn spawn_command(state: &mut Smallvil, command: &str, args: Vec<&str>) {
@@ -597,35 +633,17 @@ impl Smallvil {
             }
             InputEvent::PointerButton { event, .. } => {
                 let pointer = self.seat.get_pointer().unwrap();
-                let keyboard = self.seat.get_keyboard().unwrap();
-
                 let serial = SERIAL_COUNTER.next_serial();
-
                 let button = event.button_code();
-
                 let button_state = event.state();
 
                 if ButtonState::Pressed == button_state && !pointer.is_grabbed() {
-                    if let Some((window, _loc)) = self
+                    if let Some((_window, _loc)) = self
                         .space
                         .element_under(pointer.current_location())
                         .map(|(w, l)| (w.clone(), l))
                     {
-                        self.space.raise_element(&window, true);
-                        keyboard.set_focus(
-                            self,
-                            Some(window.toplevel().unwrap().wl_surface().clone()),
-                            serial,
-                        );
-                        self.space.elements().for_each(|window| {
-                            window.toplevel().unwrap().send_pending_configure();
-                        });
-                    } else {
-                        self.space.elements().for_each(|window| {
-                            window.set_activated(false);
-                            window.toplevel().unwrap().send_pending_configure();
-                        });
-                        keyboard.set_focus(self, Option::<WlSurface>::None, serial);
+                        // TODO: Move to the window the user clicked on
                     }
                 };
 

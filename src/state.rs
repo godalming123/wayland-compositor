@@ -64,6 +64,18 @@ pub struct WorkspaceAreas<T> {
 }
 
 impl<A> WorkspaceAreas<A> {
+    pub fn get<'l>(&'l self, position: WindowPosition) -> &'l A {
+        match position {
+            WindowPosition::TopLeft => &self.top_left_window,
+            WindowPosition::Top => &self.top_window,
+            WindowPosition::TopRight => &self.top_right_window,
+            WindowPosition::Right => &self.right_window,
+            WindowPosition::BottomRight => &self.bottom_right_window,
+            WindowPosition::Bottom => &self.bottom_window,
+            WindowPosition::BottomLeft => &self.bottom_left_window,
+            WindowPosition::Left => &self.left_window,
+        }
+    }
     pub fn replace(&mut self, position: WindowPosition, new_value: A) {
         match position {
             WindowPosition::TopLeft => self.top_left_window = new_value,
@@ -257,7 +269,7 @@ pub const EMPTY_WORKSPACE: SmallvilWorkspace = SmallvilWorkspace {
     bottom_right_window: Option::None,
 };
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum WindowPosition {
     TopLeft,
     Top,

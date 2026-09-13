@@ -2,7 +2,7 @@
 
 - [ ] Figure out how workspaces work
 - [ ] Figure out how multi monitor support should work
-- [ ] Maybe the keybindings to focus one of the eight windows visible should be based on what kind of window your focusing
+- [ ] Maybe the keybindings to focus one of the eight windows visible should be based on what kind of window you're focusing
   - For example, `w` to focus the window position where a web browser goes, `t` to focus the window position where a terminal goes, ETC
 
 # Improve the implementation of the mental model
@@ -25,7 +25,7 @@
     - [ ] Inertia effects the initial speed of the animation
 - [x] There should be 8 windows rather than 4 per workspace
 - [ ] Focus a window when it opens
-- [ ] Focus a window when you move to it
+- [x] Focus a window when you move to it
 
 # Fixes
 
@@ -33,6 +33,7 @@
 - [x] Fix the weird black bars around firefox
 - [ ] Remove a window from it's workspace when it unmaps itself
 - [ ] Fix wl-copy and wl-paste
+- [ ] Fix an issue where the focussed window does not register your mouse hovering over an element
 
 # Wayland support
 
