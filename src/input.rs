@@ -15,13 +15,10 @@ use smithay::{
         keyboard::{keysyms as xkb, FilterResult, Keysym},
         pointer::{AxisFrame, ButtonEvent, MotionEvent},
     },
-    reexports::{
-        wayland_protocols::xdg::shell::server::xdg_toplevel,
-        wayland_server::protocol::wl_surface::WlSurface,
-    },
+    reexports::wayland_protocols::xdg::shell::server::xdg_toplevel,
     utils::{Logical, Point, Rectangle, Size, SERIAL_COUNTER},
 };
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use crate::state::{
     AnimationInfo, ProgressAndVelocity, Smallvil, WindowAreas, WindowPosition, WorkspaceAreas,
@@ -455,13 +452,6 @@ fn spawn_command(state: &mut Smallvil, command: &str, args: Vec<&str>) {
     }
 }
 
-fn is_focussed_window(window: &Option<smithay::desktop::Window>, focussed: &WlSurface) -> bool {
-    window
-        .as_ref()
-        .map(|window| window.toplevel().unwrap().wl_surface() == focussed)
-        .unwrap_or(false)
-}
-
 fn close_focussed_window(state: &mut Smallvil) {
     match state.workspaces[state.cur_workspace].get(state.cur_workspace_focussed_window) {
         Some(window) => {
@@ -478,27 +468,7 @@ fn handle_key_action(state: &mut Smallvil, action: Action) {
     info!("Handling key action");
     match action {
         Action::SpawnCommand(command, args) => spawn_command(state, command, args),
-        Action::FocusInDirection(direction) => match state.cur_workspace_state {
-            WorkspaceState::Grabbed(_pos) => {}
-            WorkspaceState::Normal => {
-                let window_areas = WindowAreas::from_position(state.cur_workspace_focussed_window);
-                info!("Animating 1");
-                state.cur_workspace_state = WorkspaceState::Animating(AnimationInfo {
-                    start_time: SystemTime::now(),
-                    start_info: window_areas,
-                });
-                state.cur_workspace_focussed_window = direction
-            }
-            WorkspaceState::Animating(ref info) => {
-                let (window_areas, _finished) =
-                    WindowAreas::from_animation(info, state.cur_workspace_focussed_window);
-                state.cur_workspace_state = WorkspaceState::Animating(AnimationInfo {
-                    start_time: SystemTime::now(),
-                    start_info: window_areas,
-                });
-                state.cur_workspace_focussed_window = direction;
-            }
-        },
+        Action::FocusInDirection(direction) => state.focus_in_direction(direction),
         Action::CloseFocussedWindow => close_focussed_window(state),
         Action::Quit => {
             info!("Quitting");

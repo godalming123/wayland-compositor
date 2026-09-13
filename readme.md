@@ -24,7 +24,7 @@
     - [ ] Inertia effects which window you go to
     - [ ] Inertia effects the initial speed of the animation
 - [x] There should be 8 windows rather than 4 per workspace
-- [ ] Focus a window when it opens
+- [x] Focus a window when it opens
 - [x] Focus a window when you move to it
 
 # Fixes

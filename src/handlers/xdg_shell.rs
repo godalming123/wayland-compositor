@@ -1,3 +1,5 @@
+use std::time::SystemTime;
+
 use smithay::{
     delegate_xdg_shell,
     desktop::{
@@ -13,8 +15,12 @@ use smithay::{
         },
     },
 };
+use tracing::info;
 
-use crate::{state::EMPTY_WORKSPACE, Smallvil};
+use crate::{
+    state::{AnimationInfo, WindowAreas, WindowPosition, WorkspaceState, EMPTY_WORKSPACE},
+    Smallvil,
+};
 
 impl XdgShellHandler for Smallvil {
     fn xdg_shell_state(&mut self) -> &mut XdgShellState {
@@ -26,26 +32,33 @@ impl XdgShellHandler for Smallvil {
         let workspace = &mut self.workspaces[self.cur_workspace];
         if workspace.top_left_window.is_none() {
             workspace.top_left_window = Some(window.clone());
+            self.focus_in_direction(WindowPosition::TopLeft);
         } else if workspace.top_window.is_none() {
             workspace.top_window = Some(window.clone());
+            self.focus_in_direction(WindowPosition::Top);
         } else if workspace.top_right_window.is_none() {
             workspace.top_right_window = Some(window.clone());
+            self.focus_in_direction(WindowPosition::TopRight);
         } else if workspace.right_window.is_none() {
             workspace.right_window = Some(window.clone());
+            self.focus_in_direction(WindowPosition::Right);
         } else if workspace.bottom_right_window.is_none() {
             workspace.bottom_right_window = Some(window.clone());
+            self.focus_in_direction(WindowPosition::BottomRight);
         } else if workspace.bottom_window.is_none() {
             workspace.bottom_window = Some(window.clone());
+            self.focus_in_direction(WindowPosition::Bottom);
         } else if workspace.bottom_left_window.is_none() {
             workspace.bottom_left_window = Some(window.clone());
+            self.focus_in_direction(WindowPosition::BottomLeft);
         } else if workspace.left_window.is_none() {
             workspace.left_window = Some(window.clone());
+            self.focus_in_direction(WindowPosition::Left);
         } else {
             self.cur_workspace += 1;
             self.workspaces.insert(self.cur_workspace, EMPTY_WORKSPACE);
             self.workspaces[self.cur_workspace].top_left_window = Some(window.clone());
         }
-        self.space.map_element(window, (0, 0), false);
     }
 
     fn new_popup(&mut self, surface: PopupSurface, _positioner: PositionerState) {
@@ -116,6 +129,30 @@ pub fn handle_commit(popups: &mut PopupManager, space: &Space<Window>, surface: 
 }
 
 impl Smallvil {
+    pub fn focus_in_direction(&mut self, direction: WindowPosition) {
+        match self.cur_workspace_state {
+            WorkspaceState::Grabbed(_pos) => {}
+            WorkspaceState::Normal => {
+                let window_areas = WindowAreas::from_position(self.cur_workspace_focussed_window);
+                info!("Animating 1");
+                self.cur_workspace_state = WorkspaceState::Animating(AnimationInfo {
+                    start_time: SystemTime::now(),
+                    start_info: window_areas,
+                });
+                self.cur_workspace_focussed_window = direction
+            }
+            WorkspaceState::Animating(ref info) => {
+                let (window_areas, _finished) =
+                    WindowAreas::from_animation(info, self.cur_workspace_focussed_window);
+                self.cur_workspace_state = WorkspaceState::Animating(AnimationInfo {
+                    start_time: SystemTime::now(),
+                    start_info: window_areas,
+                });
+                self.cur_workspace_focussed_window = direction;
+            }
+        }
+    }
+
     fn unconstrain_popup(&self, popup: &PopupSurface) {
         let Ok(root) = find_popup_root_surface(&PopupKind::Xdg(popup.clone())) else {
             return;
